@@ -17,7 +17,7 @@ import { logger } from "./log.ts";
 import { buildRouter } from "./routes.ts";
 import { WsHub, type ConnectionData } from "./ws.ts";
 import { MarketplaceService } from "./marketplace-service.ts";
-import { getThemeByName, setThemeInstance } from "@oh-my-pi/pi-coding-agent/modes/theme/theme";
+import { getThemeByName, setThemeInstance } from "@oh-my-pi/pi-tui/theme";
 import { SkillsService } from "./skills-service.ts";
 import { startSkillsWatcher } from "./skills-watcher.ts";
 import { KbService, resolveKbRoot } from "./kb-service.ts";

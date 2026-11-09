@@ -31,6 +31,7 @@ import type {
 	InternalResource,
 	InternalUrl,
 	ProtocolHandler,
+	SchemeSpec,
 } from "@oh-my-pi/pi-coding-agent/internal-urls";
 
 import { resolveKbRoot } from "./kb-service.ts";
@@ -156,7 +157,7 @@ async function buildDirectoryListing(
  */
 export class KbProtocolHandler implements ProtocolHandler {
 	readonly scheme = "kb";
-	readonly immutable = true;
+	readonly spec: SchemeSpec = { backing: "file", selectors: "lines", immutable: true, pathAuthority: true };
 
 	async resolve(url: InternalUrl): Promise<InternalResource> {
 		const kbRoot = path.resolve(resolveKbRoot());

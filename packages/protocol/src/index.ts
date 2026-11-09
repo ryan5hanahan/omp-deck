@@ -1033,6 +1033,7 @@ export const KNOWN_TOOLS = [
 	"web_search",
 	"eval",
 	"generate_image",
+	"todo",
 	"todo_write",
 	"browser",
 	"ast_edit",

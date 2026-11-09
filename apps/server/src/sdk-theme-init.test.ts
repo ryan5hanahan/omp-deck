@@ -6,10 +6,10 @@
  * error "undefined is not an object (evaluating 'theme.status')".
  *
  * If this test fails after an SDK upgrade, check whether `theme` moved to a
- * different module / accessor; update both index.ts AND this test.
+ * different module / accessor; update both index.ts AND this test (moved to @oh-my-pi/pi-tui/theme in SDK 18).
  */
 import { describe, expect, it } from "bun:test";
-import { getThemeByName, setThemeInstance, theme } from "@oh-my-pi/pi-coding-agent/modes/theme/theme";
+import { getThemeByName, setThemeInstance, theme } from "@oh-my-pi/pi-tui/theme";
 
 describe("SDK theme global", () => {
 	it("starts undefined and getThemeByName('dark') resolves to a usable Theme", async () => {

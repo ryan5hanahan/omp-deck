@@ -226,6 +226,20 @@ export class ExtensionUIBridge implements ExtensionUIContext {
 
 	setEditorComponent(_factory: unknown): void {}
 
+	getEditorComponent(): undefined {
+		return undefined;
+	}
+
+	addAutocompleteProvider(_factory: unknown): void {}
+
+	rerenderMessage(_timestamp: number): void {}
+
+	refreshTranscript(_ids: readonly string[]): void {}
+
+	getLinkClicksAvailable(): boolean {
+		return false;
+	}
+
 	get theme(): never {
 		// Extensions that read `ctx.ui.theme` in the deck context need to be
 		// updated; rather than ship a fake Theme that lies about color codes,

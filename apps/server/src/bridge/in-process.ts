@@ -401,7 +401,7 @@ export class InProcessAgentBridge implements AgentBridge {
 
 		const planBridge = new PlanModeBridge({
 			sessionId,
-			session: session as unknown as import("./plan-mode-bridge.ts").PlanModeSessionSurface,
+			session,
 			getArtifactsDir: () => (sessionManager as unknown as { getArtifactsDir: () => string | null }).getArtifactsDir(),
 			getSessionId: () => (sessionManager as unknown as { getSessionId: () => string | null }).getSessionId(),
 		});
@@ -445,13 +445,13 @@ export class InProcessAgentBridge implements AgentBridge {
 			}
 			// Same pattern for todos: the SDK only fires `todo_reminder` on
 			// reminder ticks (typically at turn boundaries), so the deck UI
-			// shows stale todos between an agent's `todo_write` call and the
+			// shows stale todos between an agent's `todo` call and the
 			// next reminder cycle. Synthesize `todo_phases_set` after each
-			// todo_write tool result so the Inspector TodoPanel reflects the
+			// `todo` (SDK ≤15: `todo_write`) tool result so the Inspector TodoPanel reflects the
 			// current phase tree within the same tick (T-106).
 			if (type === "tool_execution_end") {
 				const toolName = (event as { toolName?: string }).toolName;
-				if (toolName === "todo_write") {
+				if (toolName === "todo" || toolName === "todo_write") {
 					const phases = (session as unknown as { getTodoPhases?: () => unknown[] }).getTodoPhases?.();
 					if (Array.isArray(phases)) {
 						handle.emit({ type: "todo_phases_set", todoPhases: phases } as unknown as AgentSessionEventJson);
@@ -941,7 +941,7 @@ export class InProcessSessionHandle implements SessionHandle {
 		}
 		// Kick off re-enqueues synchronously so each `session.prompt` sync
 		// prelude sees `isStreaming = true`. Collect promises; await later.
-		const promises: Promise<void>[] = [];
+		const promises: Promise<boolean>[] = [];
 		for (const entry of survivors) {
 			const opts: Record<string, unknown> = { streamingBehavior: entry.behavior };
 			if (entry.images && entry.images.length > 0) opts.images = entry.images;

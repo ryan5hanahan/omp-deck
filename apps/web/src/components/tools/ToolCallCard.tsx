@@ -12,7 +12,7 @@ import { LspTool } from "./Lsp";
 import { TaskTool } from "./Task";
 import { WebSearchTool } from "./WebSearch";
 import { EvalTool } from "./Eval";
-import { TodoWriteTool } from "./TodoWrite";
+import { TodoWriteTool, todoOps } from "./TodoWrite";
 import { GenerateImageTool } from "./GenerateImage";
 import { BrowserTool } from "./Browser";
 import { GenericTool } from "./Generic";
@@ -111,11 +111,9 @@ function summarizeArgs(name: string, args: Record<string, unknown>, intent?: str
 			return String(args.agent ?? "");
 		case "generate_image":
 			return truncate(String(args.subject ?? ""), 60);
+		case "todo":
 		case "todo_write": {
-			const ops = Array.isArray((args as { ops?: unknown[] }).ops)
-				? (args as { ops: { op?: string }[] }).ops
-				: [];
-			return ops
+			return todoOps(args)
 				.map((o) => o.op)
 				.filter(Boolean)
 				.slice(0, 4)
@@ -147,6 +145,7 @@ function renderTool(name: string, props: ToolRendererProps) {
 			return <WebSearchTool {...props} />;
 		case "eval":
 			return <EvalTool {...props} />;
+		case "todo":
 		case "todo_write":
 			return <TodoWriteTool {...props} />;
 		case "generate_image":
