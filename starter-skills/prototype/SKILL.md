@@ -29,6 +29,8 @@ The two branches produce very different artifacts — getting this wrong wastes 
 
 The _answer_ is the only thing worth keeping from a prototype. Capture it somewhere durable (commit message, ADR, issue, or a `NOTES.md` next to the prototype) along with the question it was answering. If the user is around, that capture is a quick conversation; if not, leave the placeholder so they (or you, on the next pass) can fill in the verdict before deleting the prototype.
 
+When the session runs under omp-deck, the board is the durable capture too: the prototype itself needs no card (it is throwaway), but a validated answer that becomes real work gets a card then (`POST /api/tasks`; the deck context in the system prompt carries the API).
+
 ---
 
 _Sourced from [mattpocock/skills @ b8be62f](https://github.com/mattpocock/skills/blob/b8be62ffacb0118fa3eaa29a0923c87c8c11985c/skills/engineering/prototype/SKILL.md), MIT-licensed. Bundled with omp-deck starter skills on 2026-05-23._

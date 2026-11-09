@@ -9,6 +9,14 @@ A discipline for hard bugs. Skip phases only when explicitly justified.
 
 When exploring the codebase, use the project's domain glossary to get a clear mental model of the relevant modules, and check ADRs in the area you're touching.
 
+## Kanban (omp-deck)
+
+When the session runs under omp-deck (the system prompt's deck context carries the kanban API; probe `GET http://127.0.0.1:8787/api/task-states` to confirm):
+
+- Every investigation gets a card: `Diagnose: <symptom>`. Body: the reproduction plus the hypothesis log.
+- Root cause found or fix verified → `done`. When the fix is substantial work of its own, it gets its own card under the `debugging-and-error-recovery` rules.
+- No loop built, or waiting on the user for an environment or artifact → `blocked`, with the observed conditions in the body.
+
 ## Phase 1 — Build a feedback loop
 
 **This is the skill.** Everything else is mechanical. If you have a fast, deterministic, agent-runnable pass/fail signal for the bug, you will find the cause — bisection, hypothesis-testing, and instrumentation all just consume that signal. If you don't have one, no amount of staring at code will save you.
