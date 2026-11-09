@@ -128,8 +128,15 @@ export function getEffectivePrelude(): string {
 
 // ─── /start command ────────────────────────────────────────────────────────
 
+/** `os.homedir()`, re-read per call. Bun caches `os.homedir()` at startup, so
+ *  without this a runtime `HOME`/`USERPROFILE` override (the tests' sandbox)
+ *  is ignored and reads/writes hit the real user home. */
+function homeDir(): string {
+	return (process.platform === "win32" ? process.env.USERPROFILE : process.env.HOME) || os.homedir();
+}
+
 export function getStartCommandPath(): string {
-	return path.join(os.homedir(), ".omp", "agent", "commands", "start.md");
+	return path.join(homeDir(), ".omp", "agent", "commands", "start.md");
 }
 
 export interface StartCommand {
@@ -252,7 +259,7 @@ export function readMaintenanceGateState(): MaintenanceGateState {
 	const enabled = !isTruthy(disabled.rawValue);
 
 	const installedExtensionPath = path.join(
-		os.homedir(),
+		homeDir(),
 		".omp",
 		"agent",
 		"extensions",
