@@ -43,6 +43,9 @@ server.out.log
 # TypeScript incremental build cache
 *.tsbuildinfo
 
+# graphify knowledge graph (rebuild with `graphify extract .`)
+graphify-out/
+
 # Local-only routine templates. Anything matching this glob is treated as a
 # private template — the install endpoint still picks it up at runtime, but
 # it never lands in the public repo. Author shipped templates without the
