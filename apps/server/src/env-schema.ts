@@ -1,3 +1,4 @@
+import type { KnownProvider } from "@oh-my-pi/pi-ai";
 import type { EnvRestartTarget, EnvValueType } from "@omp-deck/protocol";
 
 export interface EnvSchemaEntry {
@@ -11,6 +12,17 @@ export interface EnvSchemaEntry {
 	description: string;
 	options?: string[];
 }
+
+/**
+ * API-key-only providers surfaced as cards in Settings → Providers (the OAuth
+ * list comes from the SDK). `envKey` must match the SDK's `getEnvApiKey` map.
+ */
+export const API_KEY_PROVIDERS = [
+	{ id: "openai", name: "OpenAI", envKey: "OPENAI_API_KEY" },
+	{ id: "openrouter", name: "OpenRouter", envKey: "OPENROUTER_API_KEY" },
+	{ id: "groq", name: "Groq", envKey: "GROQ_API_KEY" },
+	{ id: "xai", name: "xAI", envKey: "XAI_API_KEY" },
+] as const satisfies readonly { id: KnownProvider; name: string; envKey: `${string}_API_KEY` }[];
 
 export const ENV_SCHEMA: EnvSchemaEntry[] = [
 	{
@@ -177,11 +189,8 @@ export const ENV_SCHEMA: EnvSchemaEntry[] = [
 	},
 	...[
 		"ANTHROPIC_API_KEY",
-		"OPENAI_API_KEY",
-		"OPENROUTER_API_KEY",
-		"GROQ_API_KEY",
+		...API_KEY_PROVIDERS.map((p) => p.envKey),
 		"GOOGLE_API_KEY",
-		"XAI_API_KEY",
 	].map((key): EnvSchemaEntry => ({
 		key,
 		valueType: "string",

@@ -1612,13 +1612,18 @@ export interface ListFilePathsResponse {
 
 export type ProviderAuthState = "oauth" | "api-key" | "unconfigured";
 
-export interface ProviderInfo {
+interface ProviderInfoBase {
 	id: string;
 	name: string;
 	state: ProviderAuthState;
 	/** Number of credentials stored for the provider (1 typical; >1 for round-robin). */
 	count: number;
 }
+
+/** OAuth providers have no `kind`; API-key-only providers are configured via `envKey` under Settings → Env. */
+export type ProviderInfo =
+	| (ProviderInfoBase & { kind?: undefined })
+	| (ProviderInfoBase & { kind: "api-key"; envKey: string });
 
 export interface ListProvidersResponse {
 	providers: ProviderInfo[];

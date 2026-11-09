@@ -20,7 +20,7 @@
  */
 import { Hono } from "hono";
 import { randomUUID } from "node:crypto";
-import { getOAuthProviders } from "@oh-my-pi/pi-ai";
+import { getEnvApiKey, getOAuthProviders } from "@oh-my-pi/pi-ai";
 import type { OAuthProviderInfo } from "@oh-my-pi/pi-ai";
 import type {
 	ListProvidersResponse,
@@ -32,6 +32,7 @@ import type {
 } from "@omp-deck/protocol";
 
 import { broadcastBus } from "./broadcast-bus.ts";
+import { API_KEY_PROVIDERS } from "./env-schema.ts";
 import { getDeckAuthStorage, getDeckModelRegistry } from "./auth-singleton.ts";
 import { logger } from "./log.ts";
 
@@ -117,6 +118,20 @@ export function buildAuthOAuthRouter(): Hono {
 				name: p.name,
 				...deriveAuthState(data[String(p.id)]),
 			}));
+		const oauthIds = new Set(providers.map((p) => p.id));
+		for (const p of API_KEY_PROVIDERS) {
+			if (oauthIds.has(p.id)) continue;
+			const stored = deriveAuthState(data[p.id]);
+			const hasKey = stored.count > 0 || Boolean(getEnvApiKey(p.id));
+			providers.push({
+				id: p.id,
+				name: p.name,
+				kind: "api-key",
+				envKey: p.envKey,
+				state: hasKey ? "api-key" : "unconfigured",
+				count: Math.max(stored.count, hasKey ? 1 : 0),
+			});
+		}
 		const body: ListProvidersResponse = { providers };
 		return c.json(body);
 	});

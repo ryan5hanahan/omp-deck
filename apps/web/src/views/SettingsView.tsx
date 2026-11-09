@@ -85,7 +85,7 @@ export function SettingsView() {
 							{selected === "env" ? (
 								<EnvSection />
 							) : selected === "providers" ? (
-								<ProvidersSection />
+								<ProvidersSection onOpenEnv={() => setSection("env")} />
 							) : selected === "messaging" ? (
 								<MessagingSection />
 							) : selected === "orientation" ? (
@@ -1716,7 +1716,7 @@ function formatUptime(startedIso: string): string {
  * fires `models_changed` server-side so the picker re-empties without a
  * deck restart. See docs/oauth-deck-sdk-findings.md for the SDK contract.
  */
-function ProvidersSection() {
+function ProvidersSection({ onOpenEnv }: { onOpenEnv: () => void }) {
 	const [providers, setProviders] = useState<ProviderInfo[] | null>(null);
 	const [error, setError] = useState<string | undefined>();
 	const [loading, setLoading] = useState(true);
@@ -1782,6 +1782,7 @@ function ProvidersSection() {
 						info={p}
 						onLogin={() => setActiveFlow({ id: p.id, name: p.name })}
 						onRevoke={() => setConfirmRevoke({ id: p.id, name: p.name })}
+						onOpenEnv={onOpenEnv}
 					/>
 				))}
 			</div>
@@ -1823,10 +1824,12 @@ function ProviderCard({
 	info,
 	onLogin,
 	onRevoke,
+	onOpenEnv,
 }: {
 	info: ProviderInfo;
 	onLogin: () => void;
 	onRevoke: () => void;
+	onOpenEnv: () => void;
 }) {
 	const tone =
 		info.state === "oauth"
@@ -1855,7 +1858,16 @@ function ProviderCard({
 				{info.count > 1 ? <span className="ml-1.5">· {info.count} credentials</span> : null}
 			</div>
 			<div className="mt-1 flex gap-2">
-				{info.state === "unconfigured" ? (
+				{info.kind === "api-key" ? (
+					<Button
+						variant={info.state === "unconfigured" ? "primary" : "outline"}
+						onClick={onOpenEnv}
+						className="flex-1"
+						title={`Set ${info.envKey} under Env`}
+					>
+						{info.state === "unconfigured" ? `Set ${info.envKey}` : "Edit in Env"}
+					</Button>
+				) : info.state === "unconfigured" ? (
 					<Button variant="primary" onClick={onLogin} className="flex-1">
 						Login
 					</Button>
