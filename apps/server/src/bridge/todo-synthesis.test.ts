@@ -1,6 +1,6 @@
 /**
  * T-106 — verify the deck bridge synthesizes a `todo_phases_set` event after
- * every `todo_write` `tool_execution_end`, so the Inspector TodoPanel
+ * every `todo` (SDK ≤15: `todo_write`) `tool_execution_end`, so the Inspector TodoPanel
  * reflects in-turn changes without waiting for the SDK's reminder cycle.
  *
  * Tests the synthesis logic in isolation by replicating the listener shape
@@ -25,7 +25,7 @@ function makeListener(args: {
 		const type = event.type;
 		if (type === "tool_execution_end") {
 			const toolName = (event as { toolName?: string }).toolName;
-			if (toolName === "todo_write") {
+			if (toolName === "todo" || toolName === "todo_write") {
 				const phases = args.getTodoPhases();
 				if (Array.isArray(phases)) {
 					args.emit({ type: "todo_phases_set", todoPhases: phases });
@@ -51,6 +51,17 @@ describe("todo_phases_set synthesis", () => {
 		expect(emitted.length).toBe(1);
 		expect(emitted[0]?.type).toBe("todo_phases_set");
 		expect(emitted[0]?.todoPhases).toBe(phases);
+	});
+
+	it("emits todo_phases_set after an SDK 18 `todo` tool_execution_end", () => {
+		const emitted: Array<{ type: string; [k: string]: unknown }> = [];
+		const phases = [{ id: "p1", name: "Phase 1", tasks: [] }];
+		makeListener({
+			emit: (e) => emitted.push(e),
+			getTodoPhases: () => phases,
+		})({ type: "tool_execution_end", toolName: "todo", toolCallId: "tc1" });
+
+		expect(emitted.map((e) => e.type)).toEqual(["todo_phases_set"]);
 	});
 
 	it("does not emit for other tool_execution_end events", () => {

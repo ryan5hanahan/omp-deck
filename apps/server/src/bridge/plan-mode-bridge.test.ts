@@ -4,10 +4,9 @@
  * Exercises the per-session plan-mode state machine end-to-end without
  * spinning up a real `AgentSession`. The session-facing surface is small
  * enough that a hand-rolled stub captures it cleanly; the SDK helpers we
- * compose (`resolvePlanTitle`, `renameApprovedPlanFile`,
- * `runResolveInvocation`, `local://` resolver) run against a real
- * temporary artifacts directory so the rename + file-read paths exercise
- * actual filesystem behavior.
+ * compose (`resolveApprovedPlan`, `listPlanFiles`, `local://` resolver)
+ * run against a real temporary artifacts directory so the rename +
+ * file-read paths exercise actual filesystem behavior.
  */
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
@@ -24,19 +23,22 @@ type PromptCall = {
 	options?: { synthetic?: boolean; streamingBehavior?: "steer" | "followUp" };
 };
 
+type ProposalHandler = Parameters<PlanModeSessionSurface["setPlanProposalHandler"]>[0] & {};
+
 class StubSession implements PlanModeSessionSurface {
 	private activeTools: string[];
 	planModeStateCalls: Array<
 		{ enabled: boolean; planFilePath: string; workflow: "parallel" | "iterative" } | undefined
 	> = [];
-	standingHandlerCalls: Array<((input: unknown) => Promise<unknown> | unknown) | null> = [];
-	standingHandler: ((input: unknown) => Promise<unknown> | unknown) | null = null;
+	proposalHandlerCalls: Array<ProposalHandler | null> = [];
+	proposalHandler: ProposalHandler | null = null;
+	planReferencePaths: string[] = [];
 	markPlanReferenceSentCount = 0;
 	promptCalls: PromptCall[] = [];
 	setActiveToolsCalls: string[][] = [];
 	isStreaming = true;
 
-	constructor(initialTools: string[] = ["read", "search", "find", "lsp", "web_search", "edit", "write"]) {
+	constructor(initialTools: string[] = ["read", "search", "find", "lsp", "web_search", "edit"]) {
 		this.activeTools = [...initialTools];
 	}
 
@@ -55,11 +57,13 @@ class StubSession implements PlanModeSessionSurface {
 		this.planModeStateCalls.push(state);
 	}
 
-	setStandingResolveHandler(
-		handler: ((input: unknown) => Promise<unknown> | unknown) | null,
-	): void {
-		this.standingHandlerCalls.push(handler);
-		this.standingHandler = handler;
+	setPlanProposalHandler(handler: ProposalHandler | null): void {
+		this.proposalHandlerCalls.push(handler);
+		this.proposalHandler = handler;
+	}
+
+	setPlanReferencePath(path: string): void {
+		this.planReferencePaths.push(path);
 	}
 
 	markPlanReferenceSent(): void {
@@ -69,8 +73,9 @@ class StubSession implements PlanModeSessionSurface {
 	async prompt(
 		text: string,
 		options?: { synthetic?: boolean; streamingBehavior?: "steer" | "followUp" },
-	): Promise<void> {
+	): Promise<boolean> {
 		this.promptCalls.push({ text, ...(options ? { options } : {}) });
+		return true;
 	}
 }
 
@@ -82,19 +87,9 @@ function collect(bridge: PlanModeBridge): { frames: PlanModeFrame[]; unsub: () =
 	return { frames, unsub };
 }
 
-type ResolveAgentResult = {
+type ProposalResult = {
 	content: Array<{ type: "text"; text: string }>;
-	details: {
-		action: "apply" | "discard";
-		reason: string;
-		sourceToolName?: string;
-		sourceResultDetails?: {
-			planFilePath: string;
-			finalPlanFilePath: string;
-			title: string;
-			planExists: boolean;
-		};
-	};
+	details: { planFilePath: string; title: string; planExists: boolean };
 };
 
 interface Harness {
@@ -138,17 +133,13 @@ async function makeHarness(): Promise<Harness> {
 	};
 }
 
-async function invokeApply(h: Harness, input: { reason?: string; extra?: Record<string, unknown> } = {}): Promise<{
-	resultPromise: Promise<ResolveAgentResult>;
+/** Simulate the agent writing `title` to `xd://propose`. */
+async function invokePropose(h: Harness, title = ""): Promise<{
+	resultPromise: Promise<ProposalResult>;
 }> {
-	expect(h.session.standingHandler).not.toBeNull();
-	const handler = h.session.standingHandler!;
-	const params = {
-		action: "apply" as const,
-		reason: input.reason ?? "plan ready",
-		...(input.extra ? { extra: input.extra } : {}),
-	};
-	const resultPromise = handler(params) as Promise<ResolveAgentResult>;
+	expect(h.session.proposalHandler).not.toBeNull();
+	const handler = h.session.proposalHandler!;
+	const resultPromise = handler(title) as Promise<ProposalResult>;
 	// Don't let bun flag this as an unhandled rejection while the caller is
 	// still chaining off it — the test attaches its own assertions later.
 	resultPromise.catch(() => {});
@@ -173,17 +164,17 @@ describe("PlanModeBridge", () => {
 		await harness.cleanup();
 	});
 
-	it("enter() snapshots tools, splices in resolve, and broadcasts plan_mode_changed", async () => {
+	it("enter() snapshots tools, splices in write, and broadcasts plan_mode_changed", async () => {
 		const previousTools = harness.session.getActiveToolNames();
-		expect(previousTools.includes("resolve")).toBe(false);
+		expect(previousTools.includes("write")).toBe(false);
 
 		await harness.bridge.enter();
 
-		expect(harness.session.getActiveToolNames()).toEqual([...previousTools, "resolve"]);
+		expect(harness.session.getActiveToolNames()).toEqual([...previousTools, "write"]);
 		expect(harness.session.planModeStateCalls).toEqual([
 			{ enabled: true, planFilePath: "local://PLAN.md", workflow: "parallel" },
 		]);
-		expect(harness.session.standingHandler).toBeTypeOf("function");
+		expect(harness.session.proposalHandler).toBeTypeOf("function");
 		expect(harness.frames).toEqual([
 			{
 				type: "plan_mode_changed",
@@ -210,16 +201,16 @@ describe("PlanModeBridge", () => {
 		expect(harness.session.planModeStateCalls.length).toBe(stateCallsAfterFirst);
 	});
 
-	it("does not duplicate resolve when it is already in the active tool set", async () => {
-		const session = new StubSession(["read", "resolve"]);
+	it("does not duplicate write when it is already in the active tool set", async () => {
+		const session = new StubSession(["read", "write"]);
 		const bridge = new PlanModeBridge({
-			sessionId: "s_with_resolve",
+			sessionId: "s_with_write",
 			session,
 			getArtifactsDir: () => harness.dir,
-			getSessionId: () => "s_with_resolve",
+			getSessionId: () => "s_with_write",
 		});
 		await bridge.enter();
-		expect(session.getActiveToolNames()).toEqual(["read", "resolve"]);
+		expect(session.getActiveToolNames()).toEqual(["read", "write"]);
 		bridge.dispose();
 	});
 
@@ -227,11 +218,11 @@ describe("PlanModeBridge", () => {
 		await harness.bridge.enter();
 		const previousTools = harness.session
 			.getActiveToolNames()
-			.filter((t) => t !== "resolve");
+			.filter((t) => t !== "write");
 		await harness.bridge.exit("user_cancelled");
 
 		expect(harness.session.getActiveToolNames()).toEqual(previousTools);
-		expect(harness.session.standingHandler).toBeNull();
+		expect(harness.session.proposalHandler).toBeNull();
 		// First non-undefined state was the enter state; second was undefined on exit.
 		expect(harness.session.planModeStateCalls.at(-1)).toBeUndefined();
 		expect(harness.frames.at(-1)).toEqual({
@@ -247,7 +238,7 @@ describe("PlanModeBridge", () => {
 		expect(harness.frames.length).toBe(framesAfter);
 	});
 
-	it("apply throws a ToolError when plan-mode is no longer active", async () => {
+	it("propose throws a ToolError when plan-mode is no longer active", async () => {
 		await harness.bridge.enter();
 		await fs.writeFile(harness.planFile, "# Title\n");
 		// Toggle off the SDK-tracked state directly to simulate a race
@@ -255,33 +246,32 @@ describe("PlanModeBridge", () => {
 		harness.session.planModeStateCalls.push(undefined);
 		await harness.bridge.exit("user_cancelled");
 
-		const handler = harness.session.standingHandlerCalls.find((h) => h !== null) ?? null;
+		const handler = harness.session.proposalHandlerCalls.find((h) => h !== null) ?? null;
 		expect(handler).not.toBeNull();
-		await expect(handler!({ action: "apply", reason: "ready" })).rejects.toThrow(/plan mode/i);
+		await expect(handler!("ready")).rejects.toThrow(/plan mode/i);
 	});
 
-	it("apply throws a ToolError when the plan file is missing", async () => {
+	it("propose throws a ToolError when the plan file is missing", async () => {
 		await harness.bridge.enter();
 		// No PLAN.md written.
-		const handler = harness.session.standingHandler!;
-		await expect(handler({ action: "apply", reason: "ready" })).rejects.toThrow(/Plan file not found/i);
+		const handler = harness.session.proposalHandler!;
+		await expect(handler("ready")).rejects.toThrow(/Plan file not found/i);
 	});
 
-	it("approve happy path: broadcasts proposal, renames, restores tools, queues followUp", async () => {
+	it("approve happy path: broadcasts proposal, keeps the plan file, restores tools, queues followUp", async () => {
 		await harness.bridge.enter();
 		await fs.writeFile(harness.planFile, "# My feature\n\nDo a thing.\n");
 
 		const initialFrameCount = harness.frames.length;
-		const { resultPromise } = await invokeApply(harness, {
-			extra: { title: "My feature" },
-		});
+		const { resultPromise } = await invokePropose(harness, "My feature");
 
-		// Proposal broadcast should have arrived synchronously inside the apply.
+		// Proposal broadcast should have arrived inside the handler.
 		const proposedFrame = harness.frames.find((f) => f.type === "plan_proposed");
 		expect(proposedFrame).toBeDefined();
 		const proposed = proposedFrame as Extract<PlanModeFrame, { type: "plan_proposed" }>;
 		expect(proposed.suggestedTitle).toBe("My-feature");
-		expect(proposed.suggestedFinalPath).toBe("local://My-feature.md");
+		// SDK 18 never renames: the suggested path is the plan the agent wrote.
+		expect(proposed.suggestedFinalPath).toBe("local://PLAN.md");
 		expect(proposed.planContent).toMatch(/Do a thing/);
 
 		// Pending approval is exposed for snapshot replay.
@@ -297,21 +287,18 @@ describe("PlanModeBridge", () => {
 		expect(outcome).toBe("settled");
 
 		const result = await resultPromise;
-		expect(result.details.action).toBe("apply");
-		expect(result.details.sourceToolName).toBe("plan_approval");
-		expect(result.details.sourceResultDetails?.finalPlanFilePath).toBe("local://My-feature.md");
-		expect(result.details.sourceResultDetails?.planExists).toBe(true);
+		expect(result.details.planFilePath).toBe("local://PLAN.md");
+		expect(result.details.planExists).toBe(true);
 
-		// File renamed on disk.
-		await expect(fs.access(path.join(harness.dir, "local", "My-feature.md"))).resolves.toBeNull();
-		await expect(fs.access(harness.planFile)).rejects.toThrow();
+		// File left in place.
+		await expect(fs.access(harness.planFile)).resolves.toBeNull();
 
 		// Tools restored.
 		const lastSet = harness.session.setActiveToolsCalls.at(-1);
-		expect(lastSet?.includes("resolve")).toBe(false);
+		expect(lastSet?.includes("write")).toBe(false);
 
-		// Standing handler cleared.
-		expect(harness.session.standingHandler).toBeNull();
+		// Proposal handler cleared.
+		expect(harness.session.proposalHandler).toBeNull();
 
 		// Plan mode exited.
 		expect(harness.bridge.isEnabled()).toBe(false);
@@ -320,11 +307,13 @@ describe("PlanModeBridge", () => {
 		// Synthetic execute-prompt queued as followUp.
 		expect(harness.session.promptCalls.length).toBe(1);
 		const queued = harness.session.promptCalls[0]!;
-		expect(queued.text).toMatch(/Plan approved\. You MUST execute it now\./);
-		expect(queued.text).toMatch(/local:\/\/My-feature\.md/);
+		expect(queued.text).toMatch(/^Plan approved\./);
+		expect(queued.text).toMatch(/<plan path="local:\/\/PLAN\.md">/);
+		expect(queued.text).toMatch(/Do a thing/);
 		expect(queued.options?.streamingBehavior).toBe("followUp");
 
-		// Marker for the SDK that the post-approval reference has been emitted.
+		// Plan reference pinned, and marked sent by the synthetic prompt.
+		expect(harness.session.planReferencePaths).toEqual(["local://PLAN.md"]);
 		expect(harness.session.markPlanReferenceSentCount).toBe(1);
 
 		// Resolved frame broadcast.
@@ -342,13 +331,11 @@ describe("PlanModeBridge", () => {
 		expect(harness.frames.length).toBeGreaterThan(initialFrameCount);
 	});
 
-	it("approve with edited content writes back before rename", async () => {
+	it("approve with edited content writes it back to the plan file", async () => {
 		await harness.bridge.enter();
 		await fs.writeFile(harness.planFile, "# Orig\n");
 
-		const { resultPromise } = await invokeApply(harness, {
-			extra: { title: "Edited plan" },
-		});
+		const { resultPromise } = await invokePropose(harness, "Edited plan");
 		const proposed = harness.frames.find(
 			(f): f is Extract<PlanModeFrame, { type: "plan_proposed" }> => f.type === "plan_proposed",
 		)!;
@@ -358,8 +345,8 @@ describe("PlanModeBridge", () => {
 		});
 		await resultPromise;
 
-		const renamed = await fs.readFile(path.join(harness.dir, "local", "Edited-plan.md"), "utf-8");
-		expect(renamed).toBe("# Replaced\n\nNew body.\n");
+		const written = await fs.readFile(harness.planFile, "utf-8");
+		expect(written).toBe("# Replaced\n\nNew body.\n");
 		expect(harness.session.promptCalls[0]!.text).toMatch(/New body\./);
 	});
 
@@ -367,7 +354,7 @@ describe("PlanModeBridge", () => {
 		await harness.bridge.enter();
 		await fs.writeFile(harness.planFile, "# Whatever\n");
 
-		const { resultPromise } = await invokeApply(harness);
+		const { resultPromise } = await invokePropose(harness);
 		const proposed = harness.frames.find(
 			(f): f is Extract<PlanModeFrame, { type: "plan_proposed" }> => f.type === "plan_proposed",
 		)!;
@@ -376,15 +363,33 @@ describe("PlanModeBridge", () => {
 			finalPath: "local://custom_name.md",
 		});
 		const result = await resultPromise;
-		expect(result.details.sourceResultDetails?.finalPlanFilePath).toBe("local://custom_name.md");
+		expect(result.details.planFilePath).toBe("local://custom_name.md");
 		await expect(fs.access(path.join(harness.dir, "local", "custom_name.md"))).resolves.toBeNull();
+		await expect(fs.access(harness.planFile)).rejects.toThrow();
+		expect(harness.session.planReferencePaths).toEqual(["local://custom_name.md"]);
+	});
+
+	it("approve refuses to rename over an existing file", async () => {
+		await harness.bridge.enter();
+		await fs.writeFile(harness.planFile, "# Whatever\n");
+		await fs.writeFile(path.join(harness.dir, "local", "taken.md"), "keep me\n");
+
+		const { resultPromise } = await invokePropose(harness);
+		const proposed = harness.frames.find(
+			(f): f is Extract<PlanModeFrame, { type: "plan_proposed" }> => f.type === "plan_proposed",
+		)!;
+		harness.bridge.respond(proposed.proposalId, { approved: true, finalPath: "local://taken.md" });
+
+		await expect(resultPromise).rejects.toThrow(/already exists/);
+		expect(await fs.readFile(path.join(harness.dir, "local", "taken.md"), "utf-8")).toBe("keep me\n");
+		await expect(fs.access(harness.planFile)).resolves.toBeNull();
 	});
 
 	it("approve falls back to suggested path when finalPath fails sanitization", async () => {
 		await harness.bridge.enter();
 		await fs.writeFile(harness.planFile, "# Yo\n");
 
-		const { resultPromise } = await invokeApply(harness, { extra: { title: "fallback case" } });
+		const { resultPromise } = await invokePropose(harness, "fallback case");
 		const proposed = harness.frames.find(
 			(f): f is Extract<PlanModeFrame, { type: "plan_proposed" }> => f.type === "plan_proposed",
 		)!;
@@ -394,14 +399,15 @@ describe("PlanModeBridge", () => {
 			finalPath: "local://../escape.md",
 		});
 		const result = await resultPromise;
-		expect(result.details.sourceResultDetails?.finalPlanFilePath).toBe("local://fallback-case.md");
+		expect(result.details.planFilePath).toBe("local://PLAN.md");
+		await expect(fs.access(harness.planFile)).resolves.toBeNull();
 	});
 
 	it("reject path exits plan mode, broadcasts rejected resolution, and surfaces a rejection result", async () => {
 		await harness.bridge.enter();
 		await fs.writeFile(harness.planFile, "# Foo\n");
 
-		const { resultPromise } = await invokeApply(harness);
+		const { resultPromise } = await invokePropose(harness);
 		const proposed = harness.frames.find(
 			(f): f is Extract<PlanModeFrame, { type: "plan_proposed" }> => f.type === "plan_proposed",
 		)!;
@@ -425,7 +431,7 @@ describe("PlanModeBridge", () => {
 		await harness.bridge.enter();
 		await fs.writeFile(harness.planFile, "# Hi\n");
 
-		const { resultPromise } = await invokeApply(harness);
+		const { resultPromise } = await invokePropose(harness);
 		const proposed = harness.frames.find(
 			(f): f is Extract<PlanModeFrame, { type: "plan_proposed" }> => f.type === "plan_proposed",
 		)!;
@@ -441,11 +447,11 @@ describe("PlanModeBridge", () => {
 		expect(harness.bridge.respond(proposed.proposalId, { approved: true })).toBe("unknown");
 	});
 
-	it("exit() mid-approval rejects the pending promise so the standing handler fails cleanly", async () => {
+	it("exit() mid-approval rejects the pending promise so the proposal handler fails cleanly", async () => {
 		await harness.bridge.enter();
 		await fs.writeFile(harness.planFile, "# Hi\n");
 
-		const { resultPromise } = await invokeApply(harness);
+		const { resultPromise } = await invokePropose(harness);
 		expect(harness.bridge.hasPendingApproval()).toBe(true);
 
 		await harness.bridge.exit("user_cancelled");
@@ -463,7 +469,7 @@ describe("PlanModeBridge", () => {
 	it("dispose() while approval is pending rejects the promise and clears state", async () => {
 		await harness.bridge.enter();
 		await fs.writeFile(harness.planFile, "# Hi\n");
-		const { resultPromise } = await invokeApply(harness);
+		const { resultPromise } = await invokePropose(harness);
 
 		harness.bridge.dispose();
 		await expect(resultPromise).rejects.toThrow(/abandoned|disposed/i);
@@ -477,7 +483,7 @@ describe("PlanModeBridge", () => {
 		// Before any proposal: only the mode-changed replay.
 		expect(harness.bridge.getReplayFrames().map((f) => f.type)).toEqual(["plan_mode_changed"]);
 
-		const { resultPromise } = await invokeApply(harness);
+		const { resultPromise } = await invokePropose(harness);
 		const replay = harness.bridge.getReplayFrames();
 		expect(replay.map((f) => f.type as string).sort()).toEqual(
 			["plan_mode_changed", "plan_proposed"].sort(),
