@@ -47,6 +47,7 @@ import { executeTransformStep } from "./steps/transform.ts";
 import { executeWaitStep } from "./steps/wait.ts";
 import { executeWriteStep } from "./steps/write.ts";
 import { loadState } from "./state.ts";
+import { scrubbableValues, scrubSecrets, splitEnv } from "./secrets.ts";
 import type { AbortReason, RunContext, StepContextEntry, StepResult } from "./types.ts";
 
 const log = logger("routines-v1");
@@ -93,7 +94,10 @@ export async function runV1Pipeline(input: {
 	const startedAtIso = startedAt.toISOString();
 	const startedMs = Date.now();
 
-	// Initialize context.
+	// Initialize context. Sensitive env vars go to `secrets` (sandbox-redacted,
+	// scrubbed from every recorded result) instead of plain `env`.
+	const { env, secrets } = splitEnv(process.env);
+	const secretValues = scrubbableValues(secrets);
 	const context: RunContext = {
 		run: {
 			id: runId,
@@ -104,8 +108,8 @@ export async function runV1Pipeline(input: {
 		},
 		trigger: triggerPayload,
 		steps: {},
-		env: filterEnv(process.env),
-		secrets: {}, // V1: tenant `.env` secrets not yet plumbed through; placeholder
+		env,
+		secrets,
 		state: loadState(routine.id),
 	};
 
@@ -206,7 +210,10 @@ export async function runV1Pipeline(input: {
 				startedAt: new Date().toISOString(),
 			});
 
-			const result = await dispatchStep(step, context, abortSignal, defaultCwd, stepCwd, runId, routine.id, ensureAgentSandbox);
+			const result = scrubSecrets(
+				await dispatchStep(step, context, abortSignal, defaultCwd, stepCwd, runId, routine.id, ensureAgentSandbox),
+				secretValues,
+			);
 			lastResult = result;
 			finishStepRun(stepRunId, {
 				status: result.status,
@@ -405,14 +412,6 @@ async function dispatchStep(
 			};
 		}
 	}
-}
-
-function filterEnv(env: NodeJS.ProcessEnv): Record<string, string> {
-	const out: Record<string, string> = {};
-	for (const [k, v] of Object.entries(env)) {
-		if (typeof v === "string") out[k] = v;
-	}
-	return out;
 }
 
 function safeJson(value: unknown): string | null {

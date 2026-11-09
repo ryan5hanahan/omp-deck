@@ -94,7 +94,7 @@ In any string field (substitution-mode):
 - `{{ steps.<id>.json.<field> }}` — direct field access
 - `{{ steps.<id>.json.length }}` — array length (works on any list)
 - `{{ state.<key> }}` — persisted state value
-- `{{ secrets.<key> }}` — masked-but-usable secret (NEVER appears in step logs)
+- `{{ secrets.<key> }}` — masked-but-usable secret (NEVER appears in step logs). Sensitive env vars (API keys, tokens…) live here, NOT in `{{ env.<key> }}`
 
 In `when:` and `transform.body:` (JS sandbox-mode):
 - `context.steps.<id>.json`, `context.state.<key>`, `context.run`, `context.secrets`

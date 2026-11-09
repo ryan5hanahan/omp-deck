@@ -87,8 +87,11 @@ The runner exposes a `{{ expr }}` template surface for string fields:
 - `{{ steps.<id>.json.<field> }}` — structured output (e.g. parsed HTTP response)
 - `{{ steps.<id>.stdout }}` — captured stdout text
 - `{{ state.<key> }}` — persisted state from prior runs (or `set_state` earlier this run)
-- `{{ env.NAME }}` — environment variable
-- `{{ secrets.NAME }}` — env var, but redacted in logs
+- `{{ env.NAME }}` — non-sensitive environment variable
+- `{{ secrets.NAME }}` — sensitive env var (any key marked sensitive in Settings → Env, or
+  whose name contains KEY, TOKEN, SECRET, PASSW, CREDENTIAL, AUTH, COOKIE or PRIVATE).
+  Sensitive vars are **not** in `env`. Their values (8+ chars) are replaced with
+  `[REDACTED]` in every recorded step output, and read as `[REDACTED]` in `when:`/`transform`.
 
 Helpers: `{{ steps.X.json | json }}` (JSON-stringify), `{{ items | length }}`.
 
