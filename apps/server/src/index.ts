@@ -13,6 +13,7 @@ import { InProcessAgentBridge } from "./bridge/in-process.ts";
 import { RoutinesRunner } from "./routines-runner.ts";
 import { closeDb, openDb } from "./db/index.ts";
 import { loadConfig } from "./config.ts";
+import { buildAllowedHosts, rejectReason } from "./request-guard.ts";
 import { logger } from "./log.ts";
 import { buildRouter } from "./routes.ts";
 import { WsHub, type ConnectionData } from "./ws.ts";
@@ -119,10 +120,16 @@ async function main(): Promise<void> {
 	const kbWatcherDispose = startKbWatcher(kbService);
 	const ws = new WsHub(bridge);
 
+	const allowedHosts = buildAllowedHosts(config.host, config.allowedHosts);
 	server = Bun.serve<ConnectionData>({
 		hostname: config.host,
 		port: config.port,
 		fetch(req, srv) {
+			const rejected = rejectReason(req, allowedHosts);
+			if (rejected) {
+				log.warn(`rejected ${req.method} ${new URL(req.url).pathname}: ${rejected}`);
+				return new Response("Forbidden", { status: 403 });
+			}
 			const url = new URL(req.url);
 
 			if (url.pathname === "/ws") {

@@ -18,8 +18,10 @@ Bind the deck to loopback. Tailscale Serve exposes it to your tailnet over
 HTTPS with mTLS-style identity.
 
 ```sh
-# Run the deck loopback-only — the default
-OMP_DECK_HOST=127.0.0.1 OMP_DECK_PORT=8787 bun run start
+# Run the deck loopback-only — the default. Allow your tailnet name: the
+# server rejects any Host/Origin that isn't loopback or listed here.
+OMP_DECK_HOST=127.0.0.1 OMP_DECK_PORT=8787 \
+  OMP_DECK_ALLOWED_HOSTS=<hostname>.<tailnet>.ts.net bun run start
 
 # Then on the same host:
 tailscale serve --bg --https=443 http://127.0.0.1:8787

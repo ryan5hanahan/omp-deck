@@ -44,6 +44,15 @@ export const ENV_SCHEMA: EnvSchemaEntry[] = [
 		description: "Backend HTTP/WebSocket port.",
 	},
 	{
+		key: "OMP_DECK_ALLOWED_HOSTS",
+		valueType: "string",
+		sensitive: false,
+		restartRequired: true,
+		hotApply: false,
+		description:
+			"Comma-separated extra hostnames the server accepts in Host/Origin besides loopback, e.g. your Tailscale Serve name (<host>.<tailnet>.ts.net). Requests from any other website are rejected.",
+	},
+	{
 		key: "OMP_DECK_WEB_PORT",
 		defaultValue: "5173",
 		valueType: "int",

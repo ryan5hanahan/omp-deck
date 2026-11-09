@@ -38,6 +38,7 @@ The same directory holds:
 | Var | Default | Restart? | Notes |
 |---|---|---|---|
 | `OMP_DECK_HOST` | `127.0.0.1` | yes | Bind host. Loopback by default — never `0.0.0.0` without an auth layer. |
+| `OMP_DECK_ALLOWED_HOSTS` | _(none)_ | yes | Comma-separated extra hostnames accepted in `Host`/`Origin` besides loopback (e.g. `mybox.tailnet.ts.net`). Requests from any other website get `403`. |
 | `OMP_DECK_PORT` | `8787` | yes | HTTP + WebSocket port. |
 | `OMP_DECK_WEB_PORT` | `5173` | yes | Vite dev server port (dev only). Proxies `/api` and `/ws` to `OMP_DECK_PORT`. |
 | `OMP_DECK_API_BASE` | derived | no | Loopback URL standalone bridge processes use. Derived from host+port when unset. |

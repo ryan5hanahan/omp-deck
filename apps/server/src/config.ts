@@ -5,6 +5,8 @@ import * as path from "node:path";
 export interface Config {
 	host: string;
 	port: number;
+	/** Extra Host/Origin hostnames accepted besides loopback (see request-guard.ts). */
+	allowedHosts: string[];
 	defaultCwd: string;
 	extraWorkspaces: string[];
 	agentDir?: string;
@@ -77,6 +79,7 @@ export function loadConfig(): Config {
 	return {
 		host: process.env.OMP_DECK_HOST?.trim() || "127.0.0.1",
 		port: parseInt10(process.env.OMP_DECK_PORT, 8787),
+		allowedHosts: splitList(process.env.OMP_DECK_ALLOWED_HOSTS),
 		defaultCwd: path.resolve(defaultCwd),
 		extraWorkspaces: extra.map((p) => path.resolve(p)),
 		agentDir,
