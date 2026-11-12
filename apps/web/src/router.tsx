@@ -7,6 +7,7 @@ import { InboxView } from "./views/InboxView";
 import { MarketplaceView } from "./views/MarketplaceView";
 import { KbView } from "./views/KbView";
 import { GraphifyView } from "./views/GraphifyView";
+import { StudioView } from "./views/StudioView";
 import { SkillsView } from "./views/SkillsView";
 import { SettingsView } from "./views/SettingsView";
 import { IntegrationsView } from "./views/IntegrationsView";
@@ -21,6 +22,7 @@ const router = createBrowserRouter([
 	{ path: "/skills", element: <SkillsView /> },
 	{ path: "/kb", element: <KbView /> },
 	{ path: "/graphify", element: <GraphifyView /> },
+	{ path: "/studio", element: <StudioView /> },
 	{ path: "/integrations", element: <IntegrationsView /> },
 	{ path: "/settings", element: <SettingsView /> },
 ]);
