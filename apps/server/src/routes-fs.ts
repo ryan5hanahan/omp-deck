@@ -235,7 +235,7 @@ function score(entries: InventoryEntry[], rawQ: string, limit: number): Inventor
 
 // ─── Sandboxing ────────────────────────────────────────────────────────────
 
-function isCwdAllowed(cwd: string): boolean {
+export function isCwdAllowed(cwd: string): boolean {
 	// Only allow cwds under the user's home directory. The deck is loopback-
 	// only, but a buggy client shouldn't be able to probe `C:\Windows\System32`.
 	const home = process.env.HOME ?? process.env.USERPROFILE ?? "";

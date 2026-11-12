@@ -23,7 +23,7 @@ import { buildHooksRouter } from "./routes-hooks.ts";
 import { buildInboxRouter } from "./routes-inbox.ts";
 import { buildUtilityRouter } from "./routes-cron.ts";
 import { buildSlashCommandsRouter } from "./routes-slash-commands.ts";
-import { buildFsRouter } from "./routes-fs.ts";
+import { buildFsRouter, isCwdAllowed } from "./routes-fs.ts";
 import { buildBridgesRouter } from "./routes-bridges.ts";
 import { buildMarketplaceRouter } from "./routes-marketplace.ts";
 import { buildSkillsRouter } from "./routes-skills.ts";
@@ -224,6 +224,26 @@ export function buildRouter(
 			log.error(`dispose failed`, err);
 			return c.json({ error: String(err) }, 500);
 		}
+	});
+
+	// graphify output (`graphify extract .`) for a directory under home. Only
+	// these two files, same cwd policy as the @filepath picker.
+	const GRAPHIFY_FILES: Record<string, string> = {
+		"graph.html": "text/html; charset=utf-8",
+		"GRAPH_REPORT.md": "text/markdown; charset=utf-8",
+	};
+	app.get("/graphify/:file", async (c) => {
+		const file = c.req.param("file");
+		const cwd = c.req.query("cwd") ?? config.defaultCwd;
+		const type = GRAPHIFY_FILES[file];
+		if (!type) return c.json({ error: "unknown graphify file" }, 404);
+		if (!isCwdAllowed(cwd)) return c.json({ error: "cwd is not under an allowed root" }, 403);
+		const f = Bun.file(`${cwd}/graphify-out/${file}`);
+		if (!(await f.exists())) return c.json({ error: "no graphify output in this workspace" }, 404);
+		// The generated page runs scripts; sandbox it so it can't reach the API as us.
+		return new Response(f, {
+			headers: { "content-type": type, "content-security-policy": "sandbox allow-scripts" },
+		});
 	});
 
 	app.route("/", buildTasksRouter());
