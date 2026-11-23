@@ -4,15 +4,62 @@
  * on_failure, retry, timeout_secs) live in <StepCommonFields/>; this file only
  * renders the type-specific tail.
  */
-import type { RoutineStep } from "@omp-deck/protocol";
+import { useEffect, useState } from "react";
+import type { McpServerSummary, RoutineStep } from "@omp-deck/protocol";
 
-import { Field, KeyValueEditor, NumInput, TagInput, TextArea, TextInput } from "./form-primitives";
+import { mcpApi } from "@/lib/mcp-api";
+import {
+	type ArgField,
+	argFieldsFromSchema,
+	argText,
+	coerceArgText,
+	parseArgsJson,
+	withArg,
+} from "@/lib/mcp-args-form";
+import { skillsApi } from "@/lib/skills-api";
+
+import {
+	ComboSelect,
+	Field,
+	KeyValueEditor,
+	NumInput,
+	Select,
+	TagInput,
+	TextArea,
+	TextInput,
+} from "./form-primitives";
 
 type Extract2<T extends RoutineStep["type"]> = Extract<RoutineStep, { type: T }>;
 
 interface FormProps<T extends RoutineStep["type"]> {
 	step: Extract2<T>;
 	onChange: (next: Extract2<T>) => void;
+}
+
+/** Loads `load(key)` once per `key` (not per render or keystroke); `undefined` loads nothing. */
+function useFetched<T>(
+	key: string | undefined,
+	load: (key: string) => Promise<T>,
+): { data?: T; error?: string; loading: boolean } {
+	const [state, setState] = useState<{ key: string; data?: T; error?: string }>();
+	useEffect(() => {
+		if (key === undefined) return;
+		let live = true;
+		load(key).then(
+			(data) => {
+				if (live) setState({ key, data });
+			},
+			(e: unknown) => {
+				if (live) setState({ key, error: e instanceof Error ? e.message : String(e) });
+			},
+		);
+		return () => {
+			live = false;
+		};
+	}, [key]);
+	if (key === undefined) return { loading: false };
+	if (!state || state.key !== key) return { loading: true };
+	return { data: state.data, error: state.error, loading: false };
 }
 
 // ─── run ──────────────────────────────────────────────────────────────────
@@ -48,6 +95,11 @@ export function RunStepForm({ step, onChange }: FormProps<"run">) {
 // ─── agent ────────────────────────────────────────────────────────────────
 
 export function AgentStepForm({ step, onChange }: FormProps<"agent">) {
+	// Suggestions only: a failed load leaves free typing.
+	const servers = useFetched("mcp-servers", () => mcpApi.list());
+	const skills = useFetched("skills", () => skillsApi.list());
+	const serverNames = servers.data?.map((s) => s.name);
+	const skillNames = skills.data && [...new Set(skills.data.skills.filter((s) => s.enabled).map((s) => s.name))];
 	function patch(p: Partial<Extract2<"agent">>): void {
 		onChange({ ...step, ...p });
 	}
@@ -59,6 +111,7 @@ export function AgentStepForm({ step, onChange }: FormProps<"agent">) {
 					onChange={(v) => patch({ prompt: v })}
 					rows={6}
 					placeholder="Summarize {{ steps.fetch_tasks.json }} in 2 sentences."
+					ariaLabel="prompt"
 				/>
 			</Field>
 			<Field label="model (optional)">
@@ -71,6 +124,7 @@ export function AgentStepForm({ step, onChange }: FormProps<"agent">) {
 						onChange(next);
 					}}
 					placeholder="claude-sonnet-4-5 (defaults to omp's active model)"
+					ariaLabel="model"
 					mono
 				/>
 			</Field>
@@ -85,6 +139,8 @@ export function AgentStepForm({ step, onChange }: FormProps<"agent">) {
 							onChange(next);
 						}}
 						placeholder="skill-name"
+						suggestions={skillNames}
+						ariaLabel="skills_allowed"
 					/>
 				</Field>
 				<Field label="mcp_servers_allowed">
@@ -97,6 +153,8 @@ export function AgentStepForm({ step, onChange }: FormProps<"agent">) {
 							onChange(next);
 						}}
 						placeholder="server-name"
+						suggestions={serverNames}
+						ariaLabel="mcp_servers_allowed"
 					/>
 				</Field>
 			</div>
@@ -549,46 +607,159 @@ export function DeckStepForm({ step, onChange }: FormProps<"deck">) {
 
 // ─── mcp ──────────────────────────────────────────────────────────────────
 
+function serverLabel(s: McpServerSummary): string {
+	if (!s.enabled) return `${s.name} (disabled)`;
+	return s.status === "connected" ? s.name : `${s.name} (${s.status})`;
+}
+
+type Hint = { text?: string; tone?: "danger" | "warn" };
+
 export function McpStepForm({ step, onChange }: FormProps<"mcp">) {
+	const servers = useFetched("mcp-servers", () => mcpApi.list());
+	const server = servers.data?.find((s) => s.name === step.server);
+	// Only installed names load tools, so typing a free-text name never fetches per keystroke.
+	const tools = useFetched(server?.name, (name) => mcpApi.tools(name));
+	const tool = tools.data?.find((t) => t.name === step.tool);
+	const fields = tool ? argFieldsFromSchema(tool.inputSchema) : [];
+	const args = step.args ?? {};
+
+	// The textarea keeps its own text so invalid JSON stays visible; the spec keeps the last valid args.
+	const argsJson = JSON.stringify(args);
+	const [text, setText] = useState(() => JSON.stringify(args, null, 2));
+	const [jsonError, setJsonError] = useState<string>();
+	const [syncedJson, setSyncedJson] = useState(argsJson);
+	if (argsJson !== syncedJson) {
+		// args changed outside the textarea (a generated input, another step): show them unless the text already says the same.
+		setSyncedJson(argsJson);
+		const current = parseArgsJson(text);
+		if (!("args" in current) || JSON.stringify(current.args) !== argsJson) {
+			setText(JSON.stringify(args, null, 2));
+			setJsonError(undefined);
+		}
+	}
+
 	function patch(p: Partial<Extract2<"mcp">>): void {
 		onChange({ ...step, ...p });
 	}
+
+	let serverHint: Hint = {};
+	if (servers.loading) serverHint = { text: "loading…" };
+	else if (servers.error) serverHint = { text: servers.error, tone: "danger" };
+	else if (servers.data?.length === 0) serverHint = { text: "none installed (see Integrations)", tone: "warn" };
+	else if (!server) serverHint = step.server ? { text: "not installed", tone: "warn" } : {};
+	else if (!server.enabled) serverHint = { text: "disabled", tone: "warn" };
+	else if (server.error) serverHint = { text: server.error, tone: "danger" };
+	else serverHint = { text: `${server.status} · ${server.toolCount} tools` };
+
+	let toolHint: Hint = {};
+	if (!server) toolHint = {};
+	else if (tools.loading) toolHint = { text: "loading…" };
+	else if (tools.error) toolHint = { text: tools.error, tone: "danger" };
+	else if (tools.data?.length === 0) toolHint = { text: "server lists no tools", tone: "warn" };
+	else if (step.tool && !tool) toolHint = { text: "not on this server", tone: "warn" };
+
 	return (
 		<div className="space-y-2">
 			<div className="grid grid-cols-2 gap-2">
-				<Field label="server">
-					<TextInput
+				<Field label="server" hint={serverHint.text} tone={serverHint.tone}>
+					<ComboSelect
 						value={step.server}
 						onChange={(v) => patch({ server: v })}
-						placeholder="filesystem"
-						mono
+						options={(servers.data ?? []).map((s) => ({ value: s.name, label: serverLabel(s) }))}
+						placeholder="pick a server…"
+						ariaLabel="server"
 					/>
 				</Field>
-				<Field label="tool">
-					<TextInput
+				<Field label="tool" hint={toolHint.text} tone={toolHint.tone}>
+					<ComboSelect
 						value={step.tool}
 						onChange={(v) => patch({ tool: v })}
-						placeholder="read_text_file"
-						mono
+						options={(tools.data ?? []).map((t) => ({ value: t.name, label: t.name }))}
+						placeholder="pick a tool…"
+						ariaLabel="tool"
 					/>
 				</Field>
 			</div>
-			<Field label="args (JSON)">
+			{tool?.description ? (
+				<div className="line-clamp-3 text-2xs text-ink-3" title={tool.description}>
+					{tool.description}
+				</div>
+			) : null}
+			{fields.map((f) => (
+				<ArgInput
+					key={f.name}
+					field={f}
+					value={args[f.name]}
+					onChange={(v) => patch({ args: withArg(args, f.name, v) })}
+				/>
+			))}
+			<Field label="args (JSON)" hint={jsonError} tone="danger">
 				<TextArea
-					value={step.args ? JSON.stringify(step.args, null, 2) : "{}"}
+					value={text}
 					onChange={(v) => {
-						try {
-							const parsed = JSON.parse(v) as Record<string, unknown>;
-							patch({ args: parsed });
-						} catch {
-							// keep prior — invalid JSON noted by the spec validator on save
+						setText(v);
+						const parsed = parseArgsJson(v);
+						if ("error" in parsed) {
+							setJsonError(parsed.error);
+							return;
 						}
+						setJsonError(undefined);
+						patch({ args: parsed.args });
 					}}
 					rows={4}
 					placeholder='{ "path": "{{ run.date }}.md" }'
+					ariaLabel="args (JSON)"
 				/>
 			</Field>
 		</div>
+	);
+}
+
+// Select value for "type a template"; real option values are indexes.
+const TEMPLATE = "template";
+
+/** A generated input for one primitive tool param. A choice field holding a value outside its options (a template included) edits as text. */
+function ArgInput({
+	field,
+	value,
+	onChange,
+}: {
+	field: ArgField;
+	value: unknown;
+	onChange: (next: unknown) => void;
+}) {
+	const ariaLabel = field.required ? `${field.name} (required)` : field.name;
+	const { options } = field;
+	const idx = options ? options.findIndex((o) => o === value) : -1;
+	const numeric = field.kind === "number" || field.kind === "integer";
+	return (
+		<Field label={field.required ? `${field.name} *` : field.name}>
+			{options && (value === undefined || idx >= 0) ? (
+				<Select
+					value={value === undefined ? "" : String(idx)}
+					onChange={(v) => onChange(v === "" ? undefined : v === TEMPLATE ? "{{ }}" : options[Number(v)])}
+					ariaLabel={ariaLabel}
+					options={[
+						{ value: "", label: field.required ? "— required —" : "— not set —" },
+						...options.map((o, i) => ({ value: String(i), label: String(o) })),
+						{ value: TEMPLATE, label: "{{ template }}…" },
+					]}
+				/>
+			) : (
+				<TextInput
+					value={argText(value)}
+					onChange={(t) => onChange(coerceArgText(field, t))}
+					placeholder={numeric ? `${field.kind} or {{ … }}` : undefined}
+					ariaLabel={ariaLabel}
+					mono
+				/>
+			)}
+			{field.description ? (
+				<div className="mt-0.5 line-clamp-2 text-2xs text-ink-4" title={field.description}>
+					{field.description}
+				</div>
+			) : null}
+		</Field>
 	);
 }
 

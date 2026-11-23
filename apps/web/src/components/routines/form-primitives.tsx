@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import { type ReactNode, useId, useState } from "react";
 
 /** Field label wrapper. `tone="danger"` colors the hint red. */
 export function Field({
@@ -30,17 +30,20 @@ export function TextInput({
 	onChange,
 	placeholder,
 	mono,
+	ariaLabel,
 }: {
 	value: string;
 	onChange: (next: string) => void;
 	placeholder?: string;
 	mono?: boolean;
+	ariaLabel?: string;
 }) {
 	return (
 		<input
 			value={value}
 			onChange={(e) => onChange(e.target.value)}
 			placeholder={placeholder}
+			aria-label={ariaLabel}
 			className={`field h-7 w-full px-2 text-2xs ${mono ? "font-mono" : ""}`}
 		/>
 	);
@@ -52,12 +55,14 @@ export function TextArea({
 	placeholder,
 	rows = 3,
 	mono = true,
+	ariaLabel,
 }: {
 	value: string;
 	onChange: (next: string) => void;
 	placeholder?: string;
 	rows?: number;
 	mono?: boolean;
+	ariaLabel?: string;
 }) {
 	return (
 		<textarea
@@ -65,6 +70,7 @@ export function TextArea({
 			onChange={(e) => onChange(e.target.value)}
 			rows={rows}
 			placeholder={placeholder}
+			aria-label={ariaLabel}
 			className={`field w-full resize-y px-2 py-1.5 text-2xs leading-relaxed ${mono ? "font-mono" : ""}`}
 		/>
 	);
@@ -101,15 +107,18 @@ export function Select<T extends string>({
 	value,
 	onChange,
 	options,
+	ariaLabel,
 }: {
 	value: T;
 	onChange: (next: T) => void;
 	options: ReadonlyArray<{ value: T; label: string }>;
+	ariaLabel?: string;
 }) {
 	return (
 		<select
 			value={value}
 			onChange={(e) => onChange(e.target.value as T)}
+			aria-label={ariaLabel}
 			className="field h-7 w-full px-2 font-mono text-2xs"
 		>
 			{options.map((o) => (
@@ -121,15 +130,75 @@ export function Select<T extends string>({
 	);
 }
 
+// Option value marking "switch to free text"; MCP server and tool names can't contain spaces.
+const TYPE_OWN = " type ";
+
+/**
+ * A select over `options` that can switch to free text. A value missing from the list
+ * (or typed while the list is empty or loading) still shows and is never rewritten.
+ */
+export function ComboSelect({
+	value,
+	onChange,
+	options,
+	placeholder,
+	ariaLabel,
+}: {
+	value: string;
+	onChange: (next: string) => void;
+	options: ReadonlyArray<{ value: string; label: string }>;
+	placeholder?: string;
+	ariaLabel: string;
+}) {
+	const [typing, setTyping] = useState(false);
+	if (typing || options.length === 0) {
+		return (
+			<div className="flex gap-1">
+				<TextInput value={value} onChange={onChange} placeholder={placeholder} ariaLabel={ariaLabel} mono />
+				{options.length > 0 ? (
+					<button
+						type="button"
+						onClick={() => setTyping(false)}
+						className="btn-ghost h-7 shrink-0 px-1.5 font-mono text-2xs"
+						aria-label={`Pick ${ariaLabel} from the list`}
+					>
+						list
+					</button>
+				) : null}
+			</div>
+		);
+	}
+	const listed = options.some((o) => o.value === value);
+	return (
+		<Select
+			value={value}
+			onChange={(next) => (next === TYPE_OWN ? setTyping(true) : onChange(next))}
+			ariaLabel={ariaLabel}
+			options={[
+				...(value === "" ? [{ value: "", label: placeholder ?? "pick…" }] : []),
+				...options,
+				...(listed || value === "" ? [] : [{ value, label: `${value} (not listed)` }]),
+				{ value: TYPE_OWN, label: "other (type it)…" },
+			]}
+		/>
+	);
+}
+
 export function TagInput({
 	values,
 	onChange,
 	placeholder,
+	suggestions,
+	ariaLabel,
 }: {
 	values: string[];
 	onChange: (next: string[]) => void;
 	placeholder?: string;
+	/** Offered through a datalist; free typing still works. */
+	suggestions?: readonly string[];
+	ariaLabel?: string;
 }) {
+	const listId = useId();
 	function remove(idx: number): void {
 		const next = values.slice();
 		next.splice(idx, 1);
@@ -162,6 +231,8 @@ export function TagInput({
 				))}
 				<input
 					placeholder={placeholder ?? "add..."}
+					aria-label={ariaLabel}
+					list={suggestions ? listId : undefined}
 					className="min-w-[6ch] flex-1 bg-transparent px-1 py-0 font-mono text-2xs text-ink outline-none placeholder:text-ink-4"
 					onKeyDown={(e) => {
 						if (e.key === "Enter" || e.key === ",") {
@@ -177,6 +248,15 @@ export function TagInput({
 						e.target.value = "";
 					}}
 				/>
+				{suggestions ? (
+					<datalist id={listId}>
+						{suggestions
+							.filter((s) => !values.includes(s))
+							.map((s) => (
+								<option key={s} value={s} />
+							))}
+					</datalist>
+				) : null}
 			</div>
 		</div>
 	);
