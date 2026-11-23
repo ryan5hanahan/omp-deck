@@ -1,7 +1,7 @@
 import { randomBytes } from "node:crypto";
 
 import { Hono } from "hono";
-import { parse as parseYaml } from "yaml";
+import { parse as parseYaml, parseDocument } from "yaml";
 
 import type {
 	CreateRoutineRequest,
@@ -25,7 +25,10 @@ import {
 	updateV1Routine,
 } from "./db/routines.ts";
 import {
+	deleteWebhookSecret,
+	getWebhookSecretByPath,
 	listStepRuns,
+	updateWebhookPath,
 	upsertWebhookSecret,
 } from "./db/routine-step-runs.ts";
 import type { RoutinesRunner } from "./routines-runner.ts";
@@ -58,6 +61,8 @@ export function buildRoutinesRouter(runner: RoutinesRunner): Hono {
 					return c.json({ error: "invalid spec", details: result.errors }, 400);
 				}
 				const typed = spec as RoutineSpec;
+				const conflict = findWebhookConflict(webhookPath(typed));
+				if (conflict) return c.json(conflictBody(conflict), 409);
 				const routine = createV1Routine({
 					name: body.name || typed.name,
 					description: body.description ?? typed.description ?? "",
@@ -65,7 +70,7 @@ export function buildRoutinesRouter(runner: RoutinesRunner): Hono {
 					spec: typed,
 					enabled: body.enabled !== false,
 				});
-				registerWebhookTriggers(typed, routine.id);
+				syncWebhookTrigger(typed, routine.id);
 				runner.schedule(routine);
 				return c.json(routine, 201);
 			} catch (err) {
@@ -113,6 +118,8 @@ export function buildRoutinesRouter(runner: RoutinesRunner): Hono {
 						return c.json({ error: "invalid spec", details: result.errors }, 400);
 					}
 					const typed = spec as RoutineSpec;
+					const conflict = findWebhookConflict(webhookPath(typed), id);
+					if (conflict) return c.json(conflictBody(conflict), 409);
 					const updated = updateV1Routine(id, {
 						name: body.name,
 						description: body.description,
@@ -121,7 +128,7 @@ export function buildRoutinesRouter(runner: RoutinesRunner): Hono {
 						enabled: body.enabled,
 					});
 					if (!updated) return c.json({ error: "not found" }, 404);
-					registerWebhookTriggers(typed, updated.id);
+					syncWebhookTrigger(typed, updated.id);
 					runner.schedule(updated);
 					return c.json(updated);
 				} catch (err) {
@@ -203,14 +210,16 @@ export function buildRoutinesRouter(runner: RoutinesRunner): Hono {
 			try { return parseYaml(r.specYaml) as RoutineSpec; } catch { return null; }
 		})();
 		if (!spec) return c.json({ error: "spec parse failure" }, 400);
-		const webhookTrigger = spec.trigger.find((t) => "webhook" in t) as { webhook: { path: string } } | undefined;
-		if (!webhookTrigger) {
+		const path = webhookPath(spec);
+		if (!path) {
 			return c.json({ error: "routine has no webhook trigger" }, 400);
 		}
+		const conflict = findWebhookConflict(path, id);
+		if (conflict) return c.json(conflictBody(conflict), 409);
 		const secret = randomBytes(32).toString("base64url");
 		const hash = hashSecretForStorage(secret);
-		upsertWebhookSecret({ routineId: id, path: webhookTrigger.webhook.path, secretHash: hash });
-		return c.json({ ok: true, secret, path: webhookTrigger.webhook.path });
+		upsertWebhookSecret({ routineId: id, path, secretHash: hash });
+		return c.json({ ok: true, secret, path });
 	});
 
 	// ─── Templates ────────────────────────────────────────────────────────
@@ -227,14 +236,27 @@ export function buildRoutinesRouter(runner: RoutinesRunner): Hono {
 		if (!validation.valid) {
 			return c.json({ error: "template spec is invalid", details: validation.errors }, 500);
 		}
+		// Installing a template twice is normal, so a taken webhook path gets the first free `-N` suffix instead of a 409.
+		let specYaml = loaded.specYaml;
+		const hookIndex = loaded.spec.trigger.findIndex((t) => "webhook" in t);
+		const hook = loaded.spec.trigger[hookIndex];
+		if (hook && "webhook" in hook) {
+			const base = hook.webhook.path;
+			for (let n = 2; getWebhookSecretByPath(hook.webhook.path); n++) hook.webhook.path = `${base}-${n}`;
+			if (hook.webhook.path !== base) {
+				const doc = parseDocument(specYaml);
+				doc.setIn(["trigger", hookIndex, "webhook", "path"], hook.webhook.path);
+				specYaml = doc.toString();
+			}
+		}
 		const routine = createV1Routine({
 			name: loaded.spec.name,
 			description: loaded.spec.description ?? "",
-			specYaml: loaded.specYaml,
+			specYaml,
 			spec: loaded.spec,
 			enabled: false,
 		});
-		registerWebhookTriggers(loaded.spec, routine.id);
+		syncWebhookTrigger(loaded.spec, routine.id);
 		runner.schedule(routine);
 		return c.json(routine, 201);
 	});
@@ -294,25 +316,49 @@ export function buildRoutinesRouter(runner: RoutinesRunner): Hono {
 	return app;
 }
 
-function registerWebhookTriggers(spec: RoutineSpec, routineId: string): void {
-	// If any webhook trigger is declared, generate an initial secret. The caller
-	// retrieves it via /webhook-secret/rotate (which always returns the plain
-	// secret — same endpoint serves both initial issuance and rotation).
-	// V1 limitation: webhook paths are globally unique. If a path is already
-	// claimed by another routine, silently skip; the routine is still created
-	// without that webhook trigger active. V1.5 will surface this in the UI.
-	for (const t of spec.trigger) {
-		if ("webhook" in t) {
-			const secret = randomBytes(32).toString("base64url");
-			try {
-				upsertWebhookSecret({
-					routineId,
-					path: t.webhook.path,
-					secretHash: hashSecretForStorage(secret),
-				});
-			} catch (err) {
-				log.warn(`webhook path ${t.webhook.path} already in use; skipping registration for ${routineId}`, err);
-			}
-		}
+class WebhookPathConflict extends Error {
+	readonly path: string;
+	readonly owner: { id: string; name: string };
+
+	constructor(path: string, owner: { id: string; name: string }) {
+		super(`webhook path ${path} is already used by routine "${owner.name}"`);
+		this.path = path;
+		this.owner = owner;
 	}
+}
+
+function conflictBody(err: WebhookPathConflict): { error: string; path: string; routine: { id: string; name: string } } {
+	return { error: err.message, path: err.path, routine: err.owner };
+}
+
+/** The spec's webhook path, if any. validateRoutineSpec allows at most one webhook trigger. */
+function webhookPath(spec: RoutineSpec): string | undefined {
+	for (const t of spec.trigger) {
+		if ("webhook" in t) return t.webhook.path;
+	}
+	return undefined;
+}
+
+/** `path` registered to a routine other than `routineId` (omitted for a routine not created yet). */
+function findWebhookConflict(path: string | undefined, routineId?: string): WebhookPathConflict | undefined {
+	const row = path ? getWebhookSecretByPath(path) : undefined;
+	if (!row || row.routine_id === routineId) return undefined;
+	return new WebhookPathConflict(row.path, { id: row.routine_id, name: getRoutine(row.routine_id)?.name ?? row.routine_id });
+}
+
+/**
+ * Make the routine's webhook row match its spec. An existing row keeps its
+ * secret, so a secret fetched via Rotate survives later saves. A new row gets
+ * a throwaway secret; the user fetches a usable one via Rotate.
+ */
+function syncWebhookTrigger(spec: RoutineSpec, routineId: string): void {
+	const path = webhookPath(spec);
+	if (!path) {
+		deleteWebhookSecret(routineId);
+		return;
+	}
+	const conflict = findWebhookConflict(path, routineId);
+	if (conflict) throw conflict;
+	if (updateWebhookPath(routineId, path)) return;
+	upsertWebhookSecret({ routineId, path, secretHash: hashSecretForStorage(randomBytes(32).toString("base64url")) });
 }

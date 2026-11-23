@@ -206,6 +206,18 @@ export function getWebhookSecretByPath(path: string): WebhookSecretRow | undefin
 	return row ?? undefined;
 }
 
+/** Repoint a routine's webhook row at `path`, keeping its secret. Returns false when the routine has no row. */
+export function updateWebhookPath(routineId: string, path: string): boolean {
+	const r = getDb()
+		.prepare<unknown, [string, string]>("UPDATE routine_webhook_secrets SET path = ? WHERE routine_id = ?")
+		.run(path, routineId);
+	return Number(r.changes ?? 0) > 0;
+}
+
+export function deleteWebhookSecret(routineId: string): void {
+	getDb().prepare<unknown, [string]>("DELETE FROM routine_webhook_secrets WHERE routine_id = ?").run(routineId);
+}
+
 export function touchWebhookSecret(routineId: string): void {
 	getDb()
 		.prepare<unknown, [string, string]>(

@@ -118,6 +118,11 @@ export function validateRoutineSpec(spec: unknown): ValidationResult {
 		return { valid: false, errors: normalizeErrors(errors) };
 	}
 
+	const webhookErrors = checkSingleWebhook(spec);
+	if (webhookErrors.length > 0) {
+		return { valid: false, errors: webhookErrors };
+	}
+
 	const crossRef = checkLayoutCrossRefs(spec);
 	if (crossRef.length > 0) {
 		return { valid: false, errors: crossRef };
@@ -210,4 +215,19 @@ function checkLayoutCrossRefs(spec: unknown): ValidationError[] {
 /** Encode a string for inclusion in a JSON Pointer per RFC 6901. */
 function encodePointer(segment: string): string {
 	return segment.replace(/~/g, "~0").replace(/\//g, "~1");
+}
+
+/** The server keeps one webhook row per routine, so a second webhook trigger could never fire. */
+function checkSingleWebhook(spec: unknown): ValidationError[] {
+	if (!spec || typeof spec !== "object" || !("trigger" in spec) || !Array.isArray(spec.trigger)) return [];
+	const count = spec.trigger.filter((t) => t && typeof t === "object" && "webhook" in t).length;
+	if (count <= 1) return [];
+	return [
+		{
+			path: "/trigger",
+			keyword: "singleWebhook",
+			message: `a routine can have at most one webhook trigger (found ${count})`,
+			params: { count },
+		},
+	];
 }

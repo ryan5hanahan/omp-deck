@@ -527,3 +527,26 @@ describe("validateAgainstSchema", () => {
 		expect(() => validateAgainstSchema({ type: "object", properties: { a: { $ref: "#/nope" } } }, {})).toThrow();
 	});
 });
+
+describe("validateRoutineSpec — webhook triggers", () => {
+	const hook = (path: string) => ({ webhook: { path, secret_env: "HOOK_SECRET" } });
+	const steps = [{ id: "noop", type: "wait", duration_secs: 1 }];
+
+	test("one webhook trigger alongside others validates", () => {
+		const result = validateRoutineSpec({ name: "one-hook", trigger: [hook("/hooks/a"), { manual: {} }], steps });
+		expect(result).toEqual({ valid: true });
+	});
+
+	test("two webhook triggers are rejected at /trigger", () => {
+		const result = validateRoutineSpec({ name: "two-hooks", trigger: [hook("/hooks/a"), hook("/hooks/b")], steps });
+		expect(result.valid).toBe(false);
+		expect(result.errors).toEqual([
+			{
+				path: "/trigger",
+				keyword: "singleWebhook",
+				message: "a routine can have at most one webhook trigger (found 2)",
+				params: { count: 2 },
+			},
+		]);
+	});
+});
