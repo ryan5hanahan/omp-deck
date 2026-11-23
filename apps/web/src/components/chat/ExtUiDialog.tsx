@@ -8,7 +8,8 @@
  *
  * Multi-question `ask` flows arrive as a sequence of single-select dialogs —
  * the SDK awaits each one before sending the next, so a single-modal-per-
- * session UX is sufficient for v1.
+ * session UX is sufficient for v1. The SDK's own "Other (type your own)" row
+ * arrives as a regular option and is followed by an `input` dialog.
  */
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { ServerFrame } from "@omp-deck/protocol";
@@ -17,8 +18,6 @@ import { Button } from "@/components/ui/Button";
 import { useStore } from "@/lib/store";
 
 type OpenFrame = Extract<ServerFrame, { type: "ext_ui_dialog_open" }>;
-
-const OTHER_OPTION_SENTINEL = "__omp_deck_other__";
 
 export function ExtUiDialog(): JSX.Element | null {
 	const activeId = useStore((s) => s.activeId);
@@ -110,9 +109,10 @@ interface SelectBodyProps {
 }
 
 /**
- * Radio list with optional "(Recommended)" marker and free-form
- * "Other (type your own)" input. Mirrors the TUI's `ask` UX so users coming
- * from `omp` see the same options.
+ * Radio list with optional "(Recommended)" marker. Options render exactly as
+ * sent: the `ask` tool appends its own "Other (type your own)" row and asks
+ * for the text in a follow-up `input` dialog, so the deck adds no free-text
+ * row (a value outside the option labels would be dropped as no answer).
  */
 function SelectBody({ dialog, onSubmit, onCancel }: SelectBodyProps): JSX.Element {
 	const options = dialog.options ?? [];
@@ -123,22 +123,8 @@ function SelectBody({ dialog, onSubmit, onCancel }: SelectBodyProps): JSX.Elemen
 	}, [dialog.initialIndex, dialog.recommended, options]);
 
 	const [selection, setSelection] = useState<string | undefined>(initial);
-	const [customValue, setCustomValue] = useState("");
-	const customRef = useRef<HTMLInputElement>(null);
-	const isCustom = selection === OTHER_OPTION_SENTINEL;
-
-	// Auto-focus the custom input when the user selects "Other".
-	useEffect(() => {
-		if (isCustom) customRef.current?.focus();
-	}, [isCustom]);
 
 	function submit(): void {
-		if (isCustom) {
-			const v = customValue.trim();
-			if (!v) return;
-			onSubmit(v);
-			return;
-		}
 		if (selection === undefined) return;
 		onSubmit(selection);
 	}
@@ -175,30 +161,10 @@ function SelectBody({ dialog, onSubmit, onCancel }: SelectBodyProps): JSX.Elemen
 						</label>
 					);
 				})}
-				<label className="flex cursor-pointer items-center gap-2 rounded border border-line/60 px-2.5 py-1.5 text-sm text-ink hover:border-line">
-					<input
-						type="radio"
-						name="ext-ui-select"
-						value={OTHER_OPTION_SENTINEL}
-						checked={isCustom}
-						onChange={() => setSelection(OTHER_OPTION_SENTINEL)}
-					/>
-					<span className="text-ink-3">Other (type your own)</span>
-				</label>
-				{isCustom ? (
-					<input
-						ref={customRef}
-						type="text"
-						value={customValue}
-						onChange={(e) => setCustomValue(e.target.value)}
-						placeholder="Custom answer"
-						className="rounded border border-line bg-paper px-2 py-1.5 font-mono text-2xs"
-					/>
-				) : null}
 			</div>
 			<DialogFooter
 				submitLabel="Send"
-				disabled={isCustom ? !customValue.trim() : selection === undefined}
+				disabled={selection === undefined}
 				onCancel={onCancel}
 			/>
 		</form>
