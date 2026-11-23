@@ -1,7 +1,8 @@
 /**
  * Unit tests for `importFromSpec`. Covers:
  *   1. Routine without `layout` → vertical fallback positions + sequential edges.
- *   2. `when:` cross-step references produce dashed inferred dependency edges.
+ *   2. `steps.<id>` references in any step field (`when`, `prompt`, nested
+ *      `args`, …) produce dashed inferred dependency edges.
  *   3. Explicit `spec.layout` round-trips: positions + edges are honored verbatim,
  *      and `layout.nodes` partial coverage still produces nodes for every step.
  */
@@ -92,6 +93,34 @@ describe("importFromSpec — no layout", () => {
 		// Exactly one sequential edge; no extra manual.
 		expect(edges).toHaveLength(1);
 		expect(edges[0]?.data?.kind).toBe("success");
+	});
+
+	test("infers dependency edges from refs in templated fields, not just `when:`", () => {
+		const spec: RoutineSpec = {
+			name: "templated-refs",
+			trigger: baseTrigger,
+			steps: [
+				{ id: "fetch", type: "http", method: "GET", url: "https://x.test" },
+				{ id: "lookup", type: "transform", body: "return 1;" },
+				{ id: "pause", type: "wait", duration_secs: 1 },
+				{ id: "summarize", type: "agent", prompt: "Summarize {{ steps.fetch.json }}" },
+				{
+					id: "send",
+					type: "mcp",
+					server: "gmail",
+					tool: "send",
+					args: { to: ["{{ steps.lookup.json }}"], note: "{{ steps.ghost.text }}" },
+				},
+			],
+		};
+		const manualPairs = importFromSpec(spec)
+			.edges.filter((e) => e.data?.kind === "manual")
+			.map((e) => [e.source, e.target]);
+		// `ghost` is not a step, so it draws nothing.
+		expect(manualPairs).toEqual([
+			["fetch", "summarize"],
+			["lookup", "send"],
+		]);
 	});
 });
 

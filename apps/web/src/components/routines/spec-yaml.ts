@@ -331,6 +331,16 @@ export function removeStep(spec: RoutineSpec, index: number): RoutineSpec {
 	return { ...spec, steps };
 }
 
+/** Deep-copy step `index` as `<id>_copy` (or `_copy2`, `_copy3`, … if taken), inserted right after it. */
+export function duplicateStep(spec: RoutineSpec, index: number): RoutineSpec {
+	const original = spec.steps[index];
+	if (!original) return spec;
+	const taken = new Set(spec.steps.map((s) => s.id));
+	let id = `${original.id}_copy`;
+	for (let n = 2; taken.has(id); n += 1) id = `${original.id}_copy${n}`;
+	return insertStep(spec, { ...structuredClone(original), id }, index + 1);
+}
+
 export function moveStep(spec: RoutineSpec, from: number, to: number): RoutineSpec {
 	if (from === to || from < 0 || to < 0 || from >= spec.steps.length || to >= spec.steps.length) {
 		return spec;

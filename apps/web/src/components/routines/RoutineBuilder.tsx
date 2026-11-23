@@ -7,16 +7,32 @@
  * Invalid YAML disables form view with an inline parse-error explanation.
  */
 import { useEffect, useMemo, useRef, useState } from "react";
+import {
+	DndContext,
+	KeyboardSensor,
+	PointerSensor,
+	useSensor,
+	useSensors,
+	type DragEndEvent,
+} from "@dnd-kit/core";
+import {
+	SortableContext,
+	arrayMove,
+	sortableKeyboardCoordinates,
+	verticalListSortingStrategy,
+} from "@dnd-kit/sortable";
 import { Copy, RefreshCcw } from "lucide-react";
 
-import type {
-	Routine,
-	RoutineDeckAction,
-	RoutineRun,
-	RoutineSpec,
-	RoutineStep,
-	RoutineTrigger,
-	ValidationError,
+import {
+	findOrderingProblems,
+	type OrderingProblem,
+	type Routine,
+	type RoutineDeckAction,
+	type RoutineRun,
+	type RoutineSpec,
+	type RoutineStep,
+	type RoutineTrigger,
+	type ValidationError,
 } from "@omp-deck/protocol";
 
 import { routinesApi } from "@/lib/routines-api";
@@ -31,6 +47,7 @@ import { SettingsForm } from "./SettingsForm";
 import { StepCard } from "./StepCard";
 import { TriggerPicker } from "./TriggerPicker";
 import {
+	duplicateStep,
 	emptyV1Spec,
 	insertStep,
 	moveStep,
@@ -62,6 +79,25 @@ function pickInitialTab(routine: Routine | undefined, spec: RoutineSpec): Tab {
 	return "steps";
 }
 
+let stepKeySeq = 0;
+/** React key + sortable id for one step card; never reused, unaffected by id renames. */
+function newStepKey(): string {
+	stepKeySeq += 1;
+	return `step-${stepKeySeq}`;
+}
+
+function laterKey(p: OrderingProblem): string {
+	return `${p.stepId}\u0000${p.ref}`;
+}
+
+interface ReorderWarning {
+	/** `stepKeys` entry of the card that was moved. */
+	key: string;
+	problems: OrderingProblem[];
+	prevSpec: RoutineSpec;
+	prevKeys: string[];
+}
+
 export function RoutineBuilder({ routine, onSaved, onError }: Props) {
 	const initialSpec = useMemo<RoutineSpec>(() => {
 		if (routine?.specYaml) {
@@ -72,6 +108,10 @@ export function RoutineBuilder({ routine, onSaved, onError }: Props) {
 	}, [routine]);
 
 	const [spec, setSpec] = useState<RoutineSpec>(initialSpec);
+	// Parallel to `spec.steps`; form-mode helpers keep it in lockstep so cards
+	// keep their state (expanded, focus) across reorders and id edits.
+	const [stepKeys, setStepKeys] = useState<string[]>(() => initialSpec.steps.map(newStepKey));
+	const [reorderWarning, setReorderWarning] = useState<ReorderWarning | null>(null);
 	const [yamlBuffer, setYamlBuffer] = useState<string>(() =>
 		routine?.specYaml ?? stringifySpec(initialSpec),
 	);
@@ -98,6 +138,8 @@ export function RoutineBuilder({ routine, onSaved, onError }: Props) {
 		if (lastRoutineId.current === routine?.id) return;
 		lastRoutineId.current = routine?.id;
 		setSpec(initialSpec);
+		setStepKeys(initialSpec.steps.map(newStepKey));
+		setReorderWarning(null);
 		setYamlBuffer(routine?.specYaml ?? stringifySpec(initialSpec));
 		setYamlDirty(false);
 		setYamlError(undefined);
@@ -111,9 +153,12 @@ export function RoutineBuilder({ routine, onSaved, onError }: Props) {
 		void routinesApi.runs(routine.id, 10).then((r) => setRuns(r.runs));
 	}, [routine]);
 
-	// Form -> YAML sync.
-	function updateSpec(next: RoutineSpec): void {
+	// Form -> YAML sync. `keys` must be passed whenever the form changed the
+	// step list; any other step change (canvas) regenerates them.
+	function updateSpec(next: RoutineSpec, keys?: string[]): void {
 		setSpec(next);
+		setStepKeys(keys ?? (next.steps === spec.steps ? stepKeys : next.steps.map(newStepKey)));
+		setReorderWarning(null);
 		setYamlBuffer(stringifySpec(next));
 		setYamlDirty(false);
 		setYamlError(undefined);
@@ -130,7 +175,10 @@ export function RoutineBuilder({ routine, onSaved, onError }: Props) {
 			else setSchemaErrors(undefined);
 			return false;
 		}
-		setSpec(result.spec ?? emptyV1Spec());
+		const nextSpec = result.spec ?? emptyV1Spec();
+		setSpec(nextSpec);
+		setStepKeys(nextSpec.steps.map(newStepKey));
+		setReorderWarning(null);
 		setYamlDirty(false);
 		setYamlError(undefined);
 		setSchemaErrors(undefined);
@@ -257,20 +305,37 @@ export function RoutineBuilder({ routine, onSaved, onError }: Props) {
 	// ─── Step helpers ───────────────────────────────────────────────────────
 
 	const existingStepIds = spec.steps.map((s) => s.id);
+	const orderingProblems = useMemo(() => findOrderingProblems(spec), [spec]);
+	const sensors = useSensors(
+		useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
+		useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
+	);
 	function onAddStep(type: RoutineStep["type"], presetAction?: RoutineDeckAction): void {
-		updateSpec(insertStep(spec, scaffoldStep(type, existingStepIds, presetAction)));
+		updateSpec(insertStep(spec, scaffoldStep(type, existingStepIds, presetAction)), [...stepKeys, newStepKey()]);
 	}
 	function onChangeStep(index: number, next: RoutineStep): void {
-		updateSpec(replaceStep(spec, index, next));
+		updateSpec(replaceStep(spec, index, next), stepKeys);
 	}
 	function onRemoveStep(index: number): void {
-		updateSpec(removeStep(spec, index));
+		updateSpec(removeStep(spec, index), stepKeys.filter((_k, i) => i !== index));
 	}
-	function onMoveUp(index: number): void {
-		updateSpec(moveStep(spec, index, Math.max(0, index - 1)));
+	function onDuplicateStep(index: number): void {
+		updateSpec(duplicateStep(spec, index), stepKeys.toSpliced(index + 1, 0, newStepKey()));
 	}
-	function onMoveDown(index: number): void {
-		updateSpec(moveStep(spec, index, Math.min(spec.steps.length - 1, index + 1)));
+	/** Shared by the arrow buttons and drag-and-drop. */
+	function reorderStep(from: number, to: number): void {
+		const next = moveStep(spec, from, to);
+		if (next === spec) return;
+		const before = new Set(orderingProblems.filter((p) => p.kind === "later").map(laterKey));
+		const introduced = findOrderingProblems(next).filter((p) => p.kind === "later" && !before.has(laterKey(p)));
+		updateSpec(next, arrayMove(stepKeys, from, to));
+		if (introduced.length > 0) {
+			setReorderWarning({ key: stepKeys[from]!, problems: introduced, prevSpec: spec, prevKeys: stepKeys });
+		}
+	}
+	function onDragEnd({ active, over }: DragEndEvent): void {
+		if (!over || active.id === over.id) return;
+		reorderStep(stepKeys.indexOf(String(active.id)), stepKeys.indexOf(String(over.id)));
 	}
 	function onChangeTriggers(triggers: RoutineTrigger[]): void {
 		updateSpec(replaceTriggers(spec, triggers));
@@ -310,19 +375,38 @@ export function RoutineBuilder({ routine, onSaved, onError }: Props) {
 								No steps yet. Pick one to start.
 							</div>
 						) : (
-							spec.steps.map((step, idx) => (
-								<StepCard
-									key={`${step.id}-${idx}`}
-									step={step}
-									index={idx}
-									total={spec.steps.length}
-									existingIds={existingStepIds}
-									onChange={(n) => onChangeStep(idx, n)}
-									onRemove={() => onRemoveStep(idx)}
-									onMoveUp={() => onMoveUp(idx)}
-									onMoveDown={() => onMoveDown(idx)}
-								/>
-							))
+							<DndContext sensors={sensors} onDragEnd={onDragEnd}>
+								<SortableContext items={stepKeys} strategy={verticalListSortingStrategy}>
+									{spec.steps.map((step, idx) => {
+										const key = stepKeys[idx]!;
+										const warning = reorderWarning?.key === key ? reorderWarning : undefined;
+										return (
+											<StepCard
+												key={key}
+												sortableId={key}
+												step={step}
+												index={idx}
+												total={spec.steps.length}
+												existingIds={existingStepIds}
+												problems={orderingProblems.filter((p) => p.stepId === step.id)}
+												reorderWarning={
+													warning
+														? {
+															problems: warning.problems,
+															onRevert: () => updateSpec(warning.prevSpec, warning.prevKeys),
+														}
+														: undefined
+												}
+												onChange={(n) => onChangeStep(idx, n)}
+												onRemove={() => onRemoveStep(idx)}
+												onDuplicate={() => onDuplicateStep(idx)}
+												onMoveUp={() => reorderStep(idx, idx - 1)}
+												onMoveDown={() => reorderStep(idx, idx + 1)}
+											/>
+										);
+									})}
+								</SortableContext>
+							</DndContext>
 						)}
 						<AddStepPicker onAdd={onAddStep} />
 					</div>

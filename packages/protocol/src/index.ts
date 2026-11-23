@@ -15,6 +15,8 @@
 // Re-export the V1 routine spec validator. JSON Schemas live in src/schemas/.
 export { validateAgainstSchema, validateRoutineSpec } from "./validate";
 export type { ValidationError, ValidationResult } from "./validate";
+export { extractStepReferences, findOrderingProblems } from "./step-references";
+export type { OrderingProblem } from "./step-references";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // REST shapes

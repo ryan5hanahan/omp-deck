@@ -12,19 +12,20 @@
  *      pair. Drawn ONLY when no explicit edges exist (`spec.layout.edges`
  *      empty or absent). Dashed; NOT deletable (would just reappear on the
  *      next import — instead the user lifts them via T-66's `applyEdgeConnection`).
- *   3. **Inferred `when:` cross-refs** — for every step whose `when:` mentions
- *      `steps.<other>` where `<other>` isn't already wired by (1) or (2),
- *      draw a dashed `manual`-kind edge from `<other>` to the step. Always
- *      drawn (independent of explicit edges) so the visual graph reflects
- *      the actual data dependencies the runtime evaluates.
+ *   3. **Inferred cross-refs**: for every step that mentions `steps.<other>`
+ *      in any field (`when`, `prompt`, `args`, …) where `<other>` isn't
+ *      already wired by (1) or (2), draw a dashed `manual`-kind edge from
+ *      `<other>` to the step. Always drawn (independent of explicit edges) so
+ *      the visual graph reflects the actual data dependencies.
  *
  * Inferred edges are NOT persisted. Only `layout.edges` round-trips through
  * YAML; everything else is recomputed from `spec.steps` on every import.
  */
-import type {
-	RoutineLayoutEdge,
-	RoutineLayoutEdgeKind,
-	RoutineSpec,
+import {
+	extractStepReferences,
+	type RoutineLayoutEdge,
+	type RoutineLayoutEdgeKind,
+	type RoutineSpec,
 } from "@omp-deck/protocol";
 
 import {
@@ -40,13 +41,6 @@ export interface ImportedGraph {
 }
 
 /**
- * `when:` expressions are JS-ish and reference steps as `steps.<id>.<field>`.
- * This regex captures `<id>` for any such reference. Identifiers follow the
- * step-id schema (`^[a-z][a-z0-9_-]*$`) so the character class is safe.
- */
-const STEPS_REFERENCE_RE = /\bsteps\.([a-z][a-z0-9_-]*)\b/g;
-
-/**
  * Build the canvas-side graph from a `RoutineSpec`.
  */
 export function importFromSpec(spec: RoutineSpec): ImportedGraph {
@@ -58,14 +52,14 @@ export function importFromSpec(spec: RoutineSpec): ImportedGraph {
 
 	const sequential = explicit.length === 0 ? buildSequentialInferred(spec) : [];
 
-	// `when:` derived edges complement whichever of (explicit, sequential)
+	// Reference-derived edges complement whichever of (explicit, sequential)
 	// fired above. Skip any `from->to` pair already covered to avoid stacking.
 	const drawn = new Set<string>();
 	for (const e of explicit) drawn.add(`${e.source}->${e.target}`);
 	for (const e of sequential) drawn.add(`${e.source}->${e.target}`);
-	const whenEdges = buildWhenInferred(spec, drawn);
+	const referenceEdges = buildReferenceInferred(spec, drawn);
 
-	return { nodes, edges: [...explicit, ...sequential, ...whenEdges] };
+	return { nodes, edges: [...explicit, ...sequential, ...referenceEdges] };
 }
 
 function buildNodes(spec: RoutineSpec): StepNode[] {
@@ -144,24 +138,21 @@ function buildSequentialInferred(spec: RoutineSpec): SequentialEdge[] {
 }
 
 /**
- * Inferred dependency edges derived from `when:` expressions referencing
- * other steps. Always drawn (independent of explicit edges) so the visual
- * graph reflects actual runtime data dependencies. `drawnPairs` is a set of
+ * Inferred dependency edges derived from `steps.<id>` references anywhere in
+ * a step. Always drawn (independent of explicit edges) so the visual graph
+ * reflects actual runtime data dependencies. `drawnPairs` is a set of
  * `from->to` strings already covered by another edge layer; matching pairs
  * are skipped to avoid double-drawing.
  */
-function buildWhenInferred(
+function buildReferenceInferred(
 	spec: RoutineSpec,
 	drawnPairs: ReadonlySet<string>,
 ): SequentialEdge[] {
 	const edges: SequentialEdge[] = [];
 	const stepIds = new Set(spec.steps.map((s) => s.id));
-	for (let i = 0; i < spec.steps.length; i++) {
-		const step = spec.steps[i];
-		if (!step?.when) continue;
-		for (const referencedId of extractStepReferences(step.when)) {
+	for (const step of spec.steps) {
+		for (const referencedId of extractStepReferences(step)) {
 			if (!stepIds.has(referencedId)) continue;
-			if (referencedId === step.id) continue; // self-ref (rare); skip
 			if (drawnPairs.has(`${referencedId}->${step.id}`)) continue;
 			edges.push({
 				id: edgeId(referencedId, step.id, "manual", 1000 + edges.length),
@@ -174,16 +165,6 @@ function buildWhenInferred(
 		}
 	}
 	return edges;
-}
-
-/** Pull every `steps.<id>` reference out of a `when:` expression. */
-function extractStepReferences(expression: string): Set<string> {
-	const ids = new Set<string>();
-	for (const match of expression.matchAll(STEPS_REFERENCE_RE)) {
-		const id = match[1];
-		if (id) ids.add(id);
-	}
-	return ids;
 }
 
 /** Stable edge id — React Flow needs them unique per render. */
