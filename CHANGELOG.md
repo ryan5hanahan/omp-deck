@@ -30,6 +30,8 @@ All notable changes to omp-deck. The format is loosely based on
 - **CI web build ran nothing on Bun 1.4.** `bun --cwd apps/web run build` prints `bun run` usage and exits 0; the step now runs `bun run --cwd apps/web build`.
 - **SDK 19.1.0 package root failed to import** (upstream #20058). `patches/@oh-my-pi%2Fpi-coding-agent@19.1.0.patch` backports upstream `295ea02a1`; remove it with the next SDK bump.
 - **Webhook secrets stopped working after a save**, and path collisions were only logged. Saving keeps the secret, removing a webhook trigger retires its path, and a path another routine owns returns 409 on create, save and rotate. Installing a template twice suffixes the path. A routine may have at most one webhook trigger.
+- **Custom answers to an agent's question were dropped on SDK 19.1.0.** 19.1.0's `ask` adds its own "Other (type your own)" row and asks for the text in a follow-up; the deck's extra free-text row duplicated it, and an answer typed there reached the agent as no answer. The dialog now shows the SDK's options only. Turn durations under a second are rounded (19.x reports fractional milliseconds).
+- **`daily-briefing` aborted on its own budget** once agent steps reported real cost: a cold run costs about $0.07, over its $0.05 cap. The cap is now $0.25.
 
 ## [0.5.0] — 2026-05-28 — Cross-platform CI, Linux container, Mac/Linux launcher
 
