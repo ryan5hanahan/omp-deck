@@ -555,10 +555,6 @@ export function McpStepForm({ step, onChange }: FormProps<"mcp">) {
 	}
 	return (
 		<div className="space-y-2">
-			<div className="rounded border border-warn/40 bg-warn/5 px-2 py-1.5 font-mono text-2xs text-warn">
-				The <code>mcp</code> step type is stubbed in V1. Runs will fail with a clear V1.5 pointer.
-				Use an <code>agent</code> step with <code>mcp_servers_allowed</code> for now.
-			</div>
 			<div className="grid grid-cols-2 gap-2">
 				<Field label="server">
 					<TextInput

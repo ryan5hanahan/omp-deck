@@ -28,6 +28,7 @@ import { KbProtocolHandler } from "./kb-protocol.ts";
 import { installStarterSkills } from "./starter-skills.ts";
 import { installStarterExtensions } from "./starter-extensions.ts";
 import { buildDefaultBridgeSupervisor } from "./bridge-supervisor.ts";
+import { disposeMcpService } from "./mcp-service.ts";
 import {
 	BrowserNotificationChannel,
 	notificationService,
@@ -213,6 +214,11 @@ async function main(): Promise<void> {
 			await bridge.dispose();
 		} catch (err) {
 			log.error(`bridge dispose threw`, err);
+		}
+		try {
+			await disposeMcpService();
+		} catch (err) {
+			log.error(`mcp service dispose threw`, err);
 		}
 		try {
 			closeDb();

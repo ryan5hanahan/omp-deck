@@ -67,6 +67,20 @@ export function renderString(template: string, context: Record<string, unknown>)
 	return stringify(value);
 }
 
+/** Render every string leaf of a JSON-like value (object bodies, tool args). */
+export function deepRender(value: unknown, ctx: Record<string, unknown>): unknown {
+	if (typeof value === "string") return render(value, ctx);
+	if (Array.isArray(value)) return value.map((v) => deepRender(v, ctx));
+	if (value && typeof value === "object") {
+		const out: Record<string, unknown> = {};
+		for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
+			out[k] = deepRender(v, ctx);
+		}
+		return out;
+	}
+	return value;
+}
+
 function evalExpression(rawExpr: string, context: Record<string, unknown>): unknown {
 	// Split on `|` for helper application. Path is first segment.
 	const parts = rawExpr.split("|").map((p) => p.trim());

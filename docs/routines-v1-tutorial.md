@@ -64,7 +64,7 @@ templating).
 | `transform` | JS expression in a quickjs sandbox; sets `steps.<id>.json`                               |
 | `set_state` | UPSERT key/value pairs into the routine's persistent state                               |
 | `wait`      | sleep N seconds (useful between polling steps)                                           |
-| `mcp`       | invoke an MCP server tool — stubbed in V1, lands in V1.5                                 |
+| `mcp`       | call one tool on an MCP server the deck can see (`mcp.json` and other discovered configs) |
 
 Every step type has the shared fields:
 
@@ -209,11 +209,6 @@ errors if anything is off.
 
 ## Limitations in V1
 
-- The `mcp` step type is **stubbed**. It validates at the schema level but
-  fails at runtime with a clear V1.5 pointer. Use an `agent` step with
-  `mcp_servers_allowed: [server-name]` instead — the SDK's MCP client tracks
-  state via `~/.omp/agent/mcp.json` and the agent has access to those tools.
-- DnD step reordering lands in V1.5. Up/down arrows work today.
 - No "test this step in isolation" runner yet — full re-run is the only
   way to debug. Coming in V2.
 - Windows console codepage mangles em-dashes in `agent` step stdout
@@ -226,6 +221,3 @@ errors if anything is off.
   server. Inbox-triager is the V1.5 proof point.
 - Real `mcp` step type with `server` + `tool` dropdowns sourced from
   installed MCP servers.
-- Drag-and-drop step reordering with smart warnings when a reorder breaks
-  a downstream context reference.
-- Per-step "Test this step" runner against the last-run context.

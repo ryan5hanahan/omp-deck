@@ -33,6 +33,7 @@ import type {
 
 import { broadcastBus } from "../broadcast-bus.ts";
 import { notificationService } from "../notifications/index.ts";
+import { getMcpService } from "../mcp-service.ts";
 import { finalizeRun, finishStepRun, insertSkippedStepRun, startStepRun } from "../db/routine-step-runs.ts";
 import { logger } from "../log.ts";
 import { accumulate, checkBudget, newBudgetState } from "./budget.ts";
@@ -40,7 +41,7 @@ import { evaluate } from "./sandbox.ts";
 import { executeAgentStep } from "./steps/agent.ts";
 import { executeDeckStep } from "./steps/deck.ts";
 import { executeHttpStep } from "./steps/http.ts";
-import { executeMcpStep } from "./steps/mcp.ts";
+import { executeMcpStep, type McpStepClient } from "./steps/mcp.ts";
 import { executeRunStep } from "./steps/run.ts";
 import { executeSetStateStep } from "./steps/set_state.ts";
 import { executeTransformStep } from "./steps/transform.ts";
@@ -88,6 +89,8 @@ export async function runV1Pipeline(input: {
 	 * the coding agent as 'briefing material').
 	 */
 	agentSandboxRoot: string;
+	/** MCP client for `mcp` steps; defaults to the deck MCP service. Tests inject a fake. */
+	mcp?: McpStepClient;
 }): Promise<{ status: "success" | "failed" | "aborted"; abortReason?: AbortReason }> {
 	const { routine, spec, runId, triggerKind, triggerPayload, abortSignal, defaultCwd, agentSandboxRoot } = input;
 	const startedAt = new Date();
@@ -211,7 +214,17 @@ export async function runV1Pipeline(input: {
 			});
 
 			const result = scrubSecrets(
-				await dispatchStep(step, context, abortSignal, defaultCwd, stepCwd, runId, routine.id, ensureAgentSandbox),
+				await dispatchStep(
+					step,
+					context,
+					abortSignal,
+					defaultCwd,
+					stepCwd,
+					runId,
+					routine.id,
+					ensureAgentSandbox,
+					input.mcp,
+				),
 				secretValues,
 			);
 			lastResult = result;
@@ -375,6 +388,7 @@ async function dispatchStep(
 	runId: string,
 	routineId: string,
 	ensureAgentSandbox: () => Promise<string>,
+	mcp: McpStepClient | undefined,
 ): Promise<StepResult> {
 	switch (step.type) {
 		case "run":
@@ -394,7 +408,7 @@ async function dispatchStep(
 		case "deck":
 			return executeDeckStep(step, context, signal);
 		case "mcp":
-			return executeMcpStep(step, context, signal);
+			return executeMcpStep(step, context, signal, mcp ?? getMcpService());
 		case "transform":
 			return executeTransformStep(step, context, signal);
 		case "wait":

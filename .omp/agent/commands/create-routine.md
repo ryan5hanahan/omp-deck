@@ -51,7 +51,7 @@ Classify each unit of work into ONE of these. Always prefer the most specific.
 | `run` | shell out to a command | `command` |
 | `set_state` | persist cross-run cursors | `state: { key: value }` |
 | `wait` | sleep N seconds between polls | `duration_secs` |
-| `mcp` | MCP tool call (V1.5 — currently stubbed) | `server`, `tool`, `args` |
+| `mcp` | call one tool on an installed MCP server (result in `steps.<id>.json`) | `server`, `tool`, `args` |
 
 ### `deck` step actions (read = slim summary; write = mutation)
 
