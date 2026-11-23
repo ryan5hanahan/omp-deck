@@ -56,7 +56,9 @@ export async function evaluate(
 	const timeoutMs = Math.min(options.timeoutMs ?? DEFAULT_TIMEOUT_MS, MAX_TIMEOUT_MS);
 	const QJS = await getRuntime();
 	const runtime = QJS.newRuntime();
-	const deadline = Date.now() + timeoutMs;
+	// The deadline bounds the user's code only; it starts once the (trusted, size-bounded) context is installed,
+	// so a large run context (e.g. a page of mail bodies) can't eat the budget on a slow host.
+	let deadline = Number.POSITIVE_INFINITY;
 	runtime.setInterruptHandler(() => Date.now() > deadline);
 	const vm = runtime.newContext();
 	try {
@@ -83,6 +85,7 @@ export async function evaluate(
 			throw new Error(`sandbox: failed to install context: ${describeError(err)}`);
 		}
 		installResult.value.dispose();
+		deadline = Date.now() + timeoutMs;
 
 		// Wrap the expression. The IIFE allows the expression to use `return`
 		// (statement form) OR be a bare expression — both forms reach this
@@ -101,6 +104,7 @@ export async function evaluate(
 				throw new Error(`sandbox: ${describeError(err)}`);
 			}
 		}
+		deadline = Number.POSITIVE_INFINITY; // marshaling the result back is ours, not the user's code
 		const value = vm.dump(result.value);
 		result.value.dispose();
 		return value;

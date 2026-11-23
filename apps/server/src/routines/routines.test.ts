@@ -177,6 +177,14 @@ describe("sandbox.evaluate — T-45 acceptance", () => {
 		expect(elapsed).toBeLessThan(500);
 	});
 
+	test("installing a large context doesn't count against the timeout; user code still does", async () => {
+		const items = Array.from({ length: 100_000 }, (_, i) => ({ id: `m${i}`, body: "x".repeat(20) }));
+		const big = { ...sampleContext, steps: { mail: { json: items } } };
+		await expect(evaluate("steps.mail.json.length", big, { timeoutMs: 1 })).resolves.toBe(100_000);
+		expect(((await evaluate("steps.mail.json", big, { timeoutMs: 1 })) as unknown[]).length).toBe(100_000);
+		await expect(evaluate("while(true){}", big, { timeoutMs: 1 })).rejects.toThrow();
+	});
+
 	test("'context.secrets.MY_KEY' returns the redacted marker, NOT the value", async () => {
 		const out = await evaluate("context.secrets.MY_KEY", sampleContext);
 		expect(out).toBe("[REDACTED]");
