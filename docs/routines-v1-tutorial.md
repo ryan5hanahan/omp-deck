@@ -61,7 +61,7 @@ templating).
 | `write`     | write a templated string to a file (overwrite or append)                                 |
 | `http`      | GET / POST / PUT / PATCH / DELETE against a URL; internal calls get an HMAC bearer token |
 | `deck`      | mutate deck-native state without hand-rolling API calls (`create_inbox_item`, `create_task`, `move_task`, `promote_inbox_item_to_task`) |
-| `transform` | JS expression in a quickjs sandbox; sets `steps.<id>.json`                               |
+| `transform` | JS expression in a quickjs sandbox (up to 1 s; `when:` guards and event filters get 100 ms); sets `steps.<id>.json` |
 | `set_state` | UPSERT key/value pairs into the routine's persistent state                               |
 | `wait`      | sleep N seconds (useful between polling steps)                                           |
 | `mcp`       | call one tool on an MCP server the deck can see (`mcp.json` and other discovered configs); install servers on the [Integrations page](./integrations.md) |

@@ -26,7 +26,8 @@ export interface EvaluateOptions {
 }
 
 const DEFAULT_TIMEOUT_MS = 100;
-const MAX_TIMEOUT_MS = 1000;
+/** Hard cap: QuickJS runs on the server's event loop, so nothing may block it longer than this. */
+export const MAX_TIMEOUT_MS = 1000;
 
 let cached: QuickJSWASMModule | null = null;
 

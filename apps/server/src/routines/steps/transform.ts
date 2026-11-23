@@ -5,7 +5,7 @@
  */
 
 import type { RoutineStep } from "@omp-deck/protocol";
-import { evaluate } from "../sandbox.ts";
+import { evaluate, MAX_TIMEOUT_MS } from "../sandbox.ts";
 import type { RunContext, StepResult } from "../types.ts";
 
 export async function executeTransformStep(
@@ -15,7 +15,8 @@ export async function executeTransformStep(
 ): Promise<StepResult> {
 	const startedMs = Date.now();
 	try {
-		const result = await evaluate(step.body, context as unknown as Record<string, unknown>);
+		// Transforms process real data (e.g. a page of mail); the 100 ms default is for `when:` guards and filters.
+		const result = await evaluate(step.body, context as unknown as Record<string, unknown>, { timeoutMs: MAX_TIMEOUT_MS });
 		return {
 			status: "success",
 			stdoutExcerpt: "",

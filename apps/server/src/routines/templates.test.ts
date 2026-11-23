@@ -529,4 +529,24 @@ describe("inbox-triager", () => {
 			}
 		});
 	}, 30_000);
+
+	test("a single 2 MB body still yields a 1000-char truncated body", async () => {
+		await withDb(async (dir, routine, spec) => {
+			const mail: FakeMessage[] = [
+				{ id: "big", thread: "tb", subject: "Huge", from: "list@example.com", body: `Start.\n${"word ".repeat(400_000)}` },
+				{ id: "small", thread: "ts", subject: "Small", from: "a@example.com", body: "after the big one" },
+			];
+			const classifier = fakeClassifier({ urgent: [], important: [], other: [] });
+
+			const { outcome, steps } = await runTriager(dir, routine, spec, fakeGmail(mail).client, classifier.run);
+
+			expect(outcome.status).toBe("success");
+			const parsed = stepJson(steps, "mail") as Array<{ id: string; body: string }>;
+			expect(parsed[0]?.body.startsWith("Start. word word")).toBe(true);
+			expect(parsed[0]?.body.endsWith(" [truncated]")).toBe(true);
+			expect(parsed[0]?.body).toHaveLength(1000 + " [truncated]".length);
+			expect(parsed[1]).toMatchObject({ id: "small", body: "after the big one" });
+			expect(steps.get("persist_state")?.status).toBe("success");
+		});
+	}, 30_000);
 });

@@ -90,7 +90,8 @@ steps:
   # marker removed so an email can't close the untrusted block early. Entries
   # ("Message ID: <id>" ... "--- BODY ---" ..., or "⚠️ Message <id>: <error>")
   # are found by their own ids, which senders don't know, so a body can't fake
-  # an entry boundary.
+  # an entry boundary. Regexes only see the first 4000 chars of a body, so the
+  # step stays inside the sandbox deadline however large the mail is.
   - id: mail
     type: transform
     when: steps.new_mail.json.length > 0
@@ -101,6 +102,7 @@ steps:
         throw new Error("unexpected get_gmail_messages_content_batch result: " + text.slice(0, 200));
       }
       const MAX = 1000;
+      const WINDOW = MAX * 4;
       const clean = (s) => String(s || "").replace(/untrusted_email_data/gi, "[removed]");
       let pos = 0;
       const starts = steps.new_mail.json.map((m) => {
@@ -113,11 +115,16 @@ steps:
         let body = "(body unavailable)";
         if (starts[i] !== -1) {
           const next = starts.slice(i + 1).find((at) => at !== -1);
-          const entry = text.slice(starts[i], next === undefined ? text.length : next);
-          const at = entry.indexOf("\n--- BODY ---\n");
-          if (at !== -1) {
-            const full = entry.slice(at + 14).replace(/\n---\n\s*\S*$/, "").replace(/\s+/g, " ").trim();
-            body = full.length > MAX ? full.slice(0, MAX) + " [truncated]" : full;
+          const end = next === undefined ? text.length : next;
+          const at = text.indexOf("\n--- BODY ---\n", starts[i]);
+          if (at !== -1 && at < end) {
+            const from = at + 14;
+            const fits = end - from <= WINDOW;
+            let raw = text.slice(from, fits ? end : from + WINDOW);
+            // The entry separator ("\n---\n" + the next entry's first token) only ends a body that fits.
+            if (fits) raw = raw.replace(/\n---\n\s*\S*$/, "");
+            const kept = raw.replace(/\s+/g, " ").trim();
+            body = !fits || kept.length > MAX ? kept.slice(0, MAX) + " [truncated]" : kept;
           }
         }
         return { id: m.id, subject: clean(m.subject), from: clean(m.from), date: m.date, body: clean(body) };
