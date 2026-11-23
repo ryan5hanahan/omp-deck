@@ -9,7 +9,8 @@ concurrency: skip
 timezone: America/Chicago
 budget:
   max_duration_secs: 120
-  max_llm_cost_usd: 0.05
+  # Real session cost, incl. cold prompt-cache writes (~$0.07 on sonnet-4-6).
+  max_llm_cost_usd: 0.25
 state:
   declared_keys: [last_briefing_date]
 tags: [daily, morning, briefing]
