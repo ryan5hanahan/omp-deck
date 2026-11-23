@@ -33,6 +33,7 @@ All notable changes to omp-deck. The format is loosely based on
 - **Custom answers to an agent's question were dropped on SDK 19.1.0.** 19.1.0's `ask` adds its own "Other (type your own)" row and asks for the text in a follow-up; the deck's extra free-text row duplicated it, and an answer typed there reached the agent as no answer. The dialog now shows the SDK's options only. Turn durations under a second are rounded (19.x reports fractional milliseconds).
 - **`daily-briefing` aborted on its own budget** once agent steps reported real cost: a cold run costs about $0.07, over its $0.05 cap. The cap is now $0.25.
 - **`transform` steps and `when:` checks could time out on large runs.** The sandbox's 100 ms limit also covered loading the run's data and returning the result, and `transform` steps got the same 100 ms as a one-line `when:` guard, so a run carrying a lot of data (a page of mail bodies) failed on a slower machine. The limit now covers only the code itself, and `transform` steps get up to 1 s (`when:` guards and event filters keep 100 ms). Infinite loops are still stopped.
+- **Auto-start couldn't be turned off.** Every new session sent `/start` (and spent tokens) even with `OMP_DECK_AUTO_START` unset, `""` or `0`, because the session bridge turned "disabled" back into `/start`. It is now off by default, as documented. **If you relied on it, set `OMP_DECK_AUTO_START=/start`** (Settings → Env).
 
 ## [0.5.0] — 2026-05-28 — Cross-platform CI, Linux container, Mac/Linux launcher
 

@@ -62,7 +62,7 @@ The same directory holds:
 
 | Var | Default | Restart? | Notes |
 |---|---|---|---|
-| `OMP_DECK_AUTO_START` | `/start` | no | Prompt fired automatically when a new session opens. Set to `""` or `0` to disable; set to any other string to override the default `/start` slash-command invocation. Requires `~/.omp/agent/commands/start.md` to exist (see [start-command-template](./start-command-template.md)). |
+| `OMP_DECK_AUTO_START` | unset (off) | no | Prompt fired automatically when a new session opens, typically `/start`. Unset, `""`, `0` or `false` disables it. Requires `~/.omp/agent/commands/start.md` for `/start` (see [start-command-template](./start-command-template.md)). |
 | `OMP_DECK_IDLE_TIMEOUT_MS` | `300000` (5 min) | no | Milliseconds before an unsubscribed idle session is reaped. `0` disables reaping. |
 
 ### Storage
