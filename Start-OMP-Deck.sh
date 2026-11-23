@@ -18,6 +18,22 @@ DECK_URL="http://127.0.0.1:5173"
 
 mkdir -p "$LOG_DIR"
 
+# Every descendant of PID $1, deepest first.
+descendants() {
+  local child
+  for child in $(pgrep -P "$1" 2>/dev/null || true); do
+    descendants "$child"
+    echo "$child"
+  done
+}
+
+# The PIDs among the arguments that are still running (prints nothing when none are).
+still_running() {
+  local p
+  for p in "$@"; do kill -0 "$p" 2>/dev/null && echo "$p"; done
+  return 0
+}
+
 case "${1:-foreground}" in
   start)
     if [ -f "$PID_FILE" ] && kill -0 "$(cat "$PID_FILE")" 2>/dev/null; then
@@ -38,17 +54,22 @@ case "${1:-foreground}" in
   stop)
     if [ -f "$PID_FILE" ]; then
       PID="$(cat "$PID_FILE")"
-      if kill -0 "$PID" 2>/dev/null; then
-        # Kill the whole process group so vite + the bun server both exit
-        # together. Falls back to SIGKILL if SIGTERM is ignored.
-        kill -TERM -"$PID" 2>/dev/null || kill -TERM "$PID" 2>/dev/null || true
-        sleep 1
-        if kill -0 "$PID" 2>/dev/null; then
-          kill -KILL -"$PID" 2>/dev/null || kill -KILL "$PID" 2>/dev/null || true
-        fi
-        echo "stopped omp-deck (PID $PID)"
+      # `bun run dev` is only a wrapper; the bun server and vite are its descendants and share the
+      # script's process group, so signal the whole tree or they outlive it and keep the ports.
+      read -ra TREE <<< "$(descendants "$PID" | tr '\n' ' ') $PID"
+      kill -TERM "${TREE[@]}" 2>/dev/null || true
+      for _ in $(seq 1 20); do
+        [ -z "$(still_running "${TREE[@]}")" ] && break
+        sleep 0.5
+      done
+      if [ -n "$(still_running "${TREE[@]}")" ]; then kill -KILL "${TREE[@]}" 2>/dev/null || true; sleep 0.5; fi
+      LEFT="$(still_running "${TREE[@]}" | tr '\n' ' ')"
+      if [ -n "$LEFT" ]; then
+        echo "could not stop omp-deck: still running: $LEFT" >&2
+        exit 1
       fi
       rm -f "$PID_FILE"
+      echo "stopped omp-deck (PID $PID and descendants: ${TREE[*]})"
     else
       echo "no PID file at $PID_FILE — nothing to stop"
     fi

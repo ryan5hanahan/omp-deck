@@ -34,6 +34,7 @@ All notable changes to omp-deck. The format is loosely based on
 - **`daily-briefing` aborted on its own budget** once agent steps reported real cost: a cold run costs about $0.07, over its $0.05 cap. The cap is now $0.25.
 - **`transform` steps and `when:` checks could time out on large runs.** The sandbox's 100 ms limit also covered loading the run's data and returning the result, and `transform` steps got the same 100 ms as a one-line `when:` guard, so a run carrying a lot of data (a page of mail bodies) failed on a slower machine. The limit now covers only the code itself, and `transform` steps get up to 1 s (`when:` guards and event filters keep 100 ms). Infinite loops are still stopped.
 - **Auto-start couldn't be turned off.** Every new session sent `/start` (and spent tokens) even with `OMP_DECK_AUTO_START` unset, `""` or `0`, because the session bridge turned "disabled" back into `/start`. It is now off by default, as documented. **If you relied on it, set `OMP_DECK_AUTO_START=/start`** (Settings → Env).
+- **`Start-OMP-Deck.sh stop` left the deck running.** It stopped only the `bun run dev` wrapper; the server and Vite kept ports 8787 and 5173, so the next `start` failed and the old server kept answering. `stop` now stops the whole process tree, waits for it to exit (forcing it after 10 s), and exits with an error naming anything still running. A deck orphaned by the old `stop` needs one manual kill (`lsof -tiTCP:8787 -sTCP:LISTEN`).
 
 ## [0.5.0] — 2026-05-28 — Cross-platform CI, Linux container, Mac/Linux launcher
 
