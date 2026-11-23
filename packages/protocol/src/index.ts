@@ -256,6 +256,45 @@ export interface SetSessionModelRequest {
 	model: ModelRef;
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// MCP integrations (/api/mcp, V1.5 F2)
+// ─────────────────────────────────────────────────────────────────────────────
+
+export type McpTransport = "stdio" | "http" | "sse";
+export type McpServerStatus = "connected" | "connecting" | "disconnected" | "error";
+/** `user` = `~/.omp/agent/mcp.json`, `project` = `<cwd>/.omp/mcp.json`, `external` = discovered from another config (read-only). */
+export type McpServerScope = "user" | "project" | "external";
+
+export interface McpServerSummary {
+	name: string;
+	scope: McpServerScope;
+	sourcePath?: string;
+	transport: McpTransport;
+	enabled: boolean;
+	status: McpServerStatus;
+	toolCount: number;
+	error?: string;
+}
+
+export interface McpToolSummary {
+	name: string;
+	title?: string;
+	description?: string;
+	inputSchema: unknown;
+	annotations?: Record<string, unknown>;
+}
+
+/** Mirrors the SDK's `MCPServerConfig` subset the add form writes. */
+export type McpServerConfigInput =
+	| { type?: "stdio"; command: string; args?: string[]; env?: Record<string, string> }
+	| { type: "http" | "sse"; url: string; headers?: Record<string, string> };
+
+export interface AddMcpServerRequest {
+	name: string;
+	scope: "user" | "project";
+	config: McpServerConfigInput;
+}
+
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Marketplace (SDK plugin catalog browsing + install/uninstall)
