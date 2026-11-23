@@ -21,6 +21,10 @@ import { executeAcpBuiltinSlashCommand } from "@oh-my-pi/pi-coding-agent/slash-c
 import type {
 	AgentMessageJson,
 	AgentSessionEventJson,
+	ExecChunkEvent,
+	ExecErrorEvent,
+	ExecLang,
+	ExecStartEvent,
 	ExtUiDialogResponse,
 	ModelInfo,
 	ModelRef,
@@ -1022,6 +1026,46 @@ export class InProcessSessionHandle implements SessionHandle {
 		// deck UI reconciles its `queuedPrompts` list.
 		this.clearQueue();
 		await this.session.abort();
+	}
+
+	/**
+	 * Composer `!` / `$` execution. The SDK emits no session events for these
+	 * runs, so output streams as `exec_chunk` and the recorded message is
+	 * re-emitted as synthetic `message_start` + `message_end`. `cd` does not
+	 * persist: the TUI's session move is not part of the SDK surface.
+	 */
+	async execute(lang: ExecLang, code: string, opts: { excludeFromContext: boolean }): Promise<void> {
+		const execId = crypto.randomUUID();
+		const { excludeFromContext } = opts;
+		// Emitted before a refusal too: the web card is keyed off `exec_start`.
+		this.emit({ type: "exec_start", execId, lang, code, excludeFromContext } satisfies ExecStartEvent);
+		const fail = (error: string): void => this.emit({ type: "exec_error", execId, error } satisfies ExecErrorEvent);
+		if (this.session.isBashRunning || this.session.isEvalRunning) {
+			const running = this.session.isBashRunning ? "A bash command" : "A Python execution";
+			fail(`${running} is already running; abort it first.`);
+			return;
+		}
+		let recorded = false;
+		const onChunk = (chunk: string): void => this.emit({ type: "exec_chunk", execId, chunk } satisfies ExecChunkEvent);
+		const onRecorded = (message: unknown): void => {
+			recorded = true;
+			this.emit({ type: "message_start", message, execId });
+			this.emit({ type: "message_end", message, execId });
+		};
+		const execOpts = { excludeFromContext, onRecorded };
+		try {
+			if (lang === "python") await this.session.executePython(code, onChunk, execOpts);
+			else await this.session.executeBash(code, onChunk, execOpts);
+			if (!recorded) fail("Execution ended without a recorded result.");
+		} catch (err) {
+			if (recorded) log.warn(`exec ${execId} threw after its result was recorded`, err);
+			else fail(String((err as Error).message ?? err));
+		}
+	}
+
+	async abortExec(): Promise<void> {
+		if (this.session.isBashRunning) this.session.abortBash();
+		if (this.session.isEvalRunning) this.session.abortEval();
 	}
 
 	async setName(name: string): Promise<void> {

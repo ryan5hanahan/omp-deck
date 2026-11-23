@@ -6,7 +6,7 @@
  * raw SDK events.
  */
 
-import type { ModelRef, PendingPlanApprovalWire, PlanModeContextWire } from "@omp-deck/protocol";
+import type { ExecLang, ModelRef, PendingPlanApprovalWire, PlanModeContextWire } from "@omp-deck/protocol";
 
 // ─── Content blocks ────────────────────────────────────────────────────────
 
@@ -111,6 +111,22 @@ export interface IrcMsg {
 	timestamp: number;
 }
 
+/** Composer `!` / `$` execution card. Discriminated by `kind`, not `role`: narrow with `"kind" in m`. */
+export interface ExecMsg {
+	kind: "exec";
+	id: string;
+	lang: ExecLang;
+	code: string;
+	output: string;
+	status: "running" | "done" | "error";
+	exitCode?: number;
+	cancelled?: boolean;
+	truncated?: boolean;
+	excludeFromContext: boolean;
+	error?: string;
+	timestamp?: number;
+}
+
 export type ChatMessage =
 	| UserMsg
 	| AssistantMsg
@@ -118,7 +134,8 @@ export type ChatMessage =
 	| NoticeMsg
 	| CompactionMsg
 	| TtsrMsg
-	| IrcMsg;
+	| IrcMsg
+	| ExecMsg;
 
 // ─── Queued prompts (sent while agent was streaming) ──────────────────────
 

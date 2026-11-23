@@ -2,6 +2,7 @@ import { create } from "zustand";
 import { subscribeWithSelector } from "zustand/middleware";
 
 import type {
+	ExecLang,
 	ExtUiDialogResponse,
 	ListSessionsResponse,
 	ListWorkspacesResponse,
@@ -163,6 +164,10 @@ interface StoreState {
 	selectSession(id: string): void;
 	sendPrompt(text: string, images?: import("@omp-deck/protocol").ImageAttachment[]): void;
 	abort(): void;
+	/** Run `!`/`$` composer input on the active session (F10). */
+	sendExec(lang: ExecLang, code: string, excludeFromContext: boolean): void;
+	/** Stop the active session's running `!`/`$` execution. */
+	abortExec(): void;
 	/** Drop every queued (followUp / steering) prompt for the active session.
 	 *  Server echoes a `queue_cleared` session event that reconciles
 	 *  `queuedPrompts` in the reducer. */
@@ -300,6 +305,18 @@ export const useStore = create<StoreState>()(
 			const id = get().activeId;
 			if (!id) return;
 			get().ws?.send({ type: "abort", sessionId: id });
+		},
+
+		sendExec(lang, code, excludeFromContext) {
+			const id = get().activeId;
+			if (!id) return;
+			get().ws?.send({ type: "exec", sessionId: id, lang, code, excludeFromContext });
+		},
+
+		abortExec() {
+			const id = get().activeId;
+			if (!id) return;
+			get().ws?.send({ type: "abort_exec", sessionId: id });
 		},
 
 		clearQueue() {

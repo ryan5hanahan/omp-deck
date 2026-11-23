@@ -16,6 +16,7 @@ import { SlashCommandPicker } from "@/components/composer/SlashCommandPicker";
 import { Paperclip, ArrowUp, Square, X } from "lucide-react";
 import type { ImageAttachment } from "@omp-deck/protocol";
 
+import { parseExecPrefix } from "@/lib/exec-prefix";
 import { selectActiveSession, useStore } from "@/lib/store";
 import { useComposerHistory } from "@/lib/use-composer-history";
 import { cn } from "@/lib/utils";
@@ -40,6 +41,8 @@ export function Composer() {
 	const session = useStore(selectActiveSession);
 	const sendPrompt = useStore((s) => s.sendPrompt);
 	const abort = useStore((s) => s.abort);
+	const sendExec = useStore((s) => s.sendExec);
+	const abortExec = useStore((s) => s.abortExec);
 	const clearQueue = useStore((s) => s.clearQueue);
 	const setPlanMode = useStore((s) => s.setPlanMode);
 	const planModeEnabled = session?.planMode?.enabled ?? false;
@@ -159,6 +162,13 @@ export function Composer() {
 	const slashOpen = slashQuery !== null && filteredSlash.length > 0;
 	const disabled = !session;
 	const isBusy = session?.status === "streaming" || session?.status === "retrying";
+	const messages = session?.messages;
+	const execRunning = useMemo(
+		() => messages?.some((m) => "kind" in m && m.kind === "exec" && m.status === "running") ?? false,
+		[messages],
+	);
+	// Images travel only with prompts, so a draft with attachments is never an execution.
+	const execDraft = images.length === 0 ? parseExecPrefix(draft) : null;
 
 	const autoresize = useCallback((): void => {
 		const ta = taRef.current;
@@ -390,6 +400,15 @@ export function Composer() {
 		const hasContent = text.trim().length > 0 || images.length > 0;
 		if (!hasContent || disabled) return;
 
+		if (execDraft) {
+			sendExec(execDraft.lang, execDraft.code, execDraft.excludeFromContext);
+			history.push(text);
+			setDraft("");
+			const ta = taRef.current;
+			if (ta) ta.style.height = "auto";
+			return;
+		}
+
 		// Intercept client-side virtual slash commands before the WS send.
 		// Shape: `/<name>[ <args>]`. Anything else falls through to sendPrompt.
 		if (text.startsWith("/") && images.length === 0) {
@@ -607,9 +626,11 @@ export function Composer() {
 				<div
 					className={cn(
 						"relative flex items-end gap-2 rounded-lg border bg-paper-2 px-2 py-1.5",
-						planModeEnabled
-							? "border-thinking/60 focus-within:border-thinking"
-							: "border-line focus-within:border-ink/30",
+						execDraft
+							? "border-accent/60 focus-within:border-accent"
+							: planModeEnabled
+								? "border-thinking/60 focus-within:border-thinking"
+								: "border-line focus-within:border-ink/30",
 					)}
 				>
 					<SlashCommandPicker
@@ -678,13 +699,13 @@ export function Composer() {
 						)}
 						disabled={disabled}
 					/>
-					{isBusy ? (
+					{isBusy || execRunning ? (
 						<button
 							type="button"
 							className="btn-danger h-7 gap-1 self-end px-2 text-xs"
-							onClick={() => abort()}
-							aria-label="Stop streaming (Ctrl+.)"
-							title="Stop streaming (Ctrl+.)"
+							onClick={() => (execRunning ? abortExec() : abort())}
+							aria-label={execRunning ? "Stop execution" : "Stop streaming (Ctrl+.)"}
+							title={execRunning ? "Stop execution" : "Stop streaming (Ctrl+.)"}
 						>
 							<Square className="h-3 w-3" fill="currentColor" />
 							<span className="font-mono uppercase tracking-meta text-2xs">stop</span>
@@ -713,6 +734,12 @@ export function Composer() {
 						>
 							{queuedCount} queued · cancel
 						</button>
+					) : null}
+					{execDraft ? (
+						<span className="uppercase tracking-meta text-accent">
+							{execDraft.lang}
+							{execDraft.excludeFromContext ? " · not sent to model" : ""}
+						</span>
 					) : null}
 					<span>
 						{images.length > 0

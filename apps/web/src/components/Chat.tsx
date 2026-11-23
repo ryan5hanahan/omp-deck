@@ -1,5 +1,8 @@
 import { useEffect, useRef } from "react";
+import { Loader2 } from "lucide-react";
 import { useStore, selectActiveSession } from "@/lib/store";
+import type { ExecMsg } from "@/lib/types";
+import { cn } from "@/lib/utils";
 import { ChatHeader } from "./chat/ChatHeader";
 import { SessionPicker } from "./chat/SessionPicker";
 import { UserMessage } from "./messages/UserMessage";
@@ -10,6 +13,7 @@ import { TtsrLine } from "./messages/TtsrLine";
 import { IrcLine } from "./messages/IrcLine";
 import { QueuedMessage } from "./messages/QueuedMessage";
 import { PlanApproval } from "./messages/PlanApproval";
+import { Pre } from "./tools/shared";
 
 export function Chat() {
 	const session = useStore(selectActiveSession);
@@ -53,6 +57,7 @@ export function Chat() {
 					) : null}
 
 					{messages.map((m) => {
+						if ("kind" in m) return <ExecCard key={m.id} msg={m} />;
 						switch (m.role) {
 							case "user":
 								return <UserMessage key={m.id} msg={m} />;
@@ -79,6 +84,40 @@ export function Chat() {
 					) : null}
 				</div>
 			</div>
+		</div>
+	);
+}
+
+/** Composer `!` / `$` execution: command header, streamed output, exit code. */
+function ExecCard({ msg }: { msg: ExecMsg }) {
+	const sigil = (msg.lang === "bash" ? "!" : "$").repeat(msg.excludeFromContext ? 2 : 1);
+	return (
+		<div className="space-y-1.5">
+			<div className="flex flex-wrap items-center gap-x-3 gap-y-1 font-mono text-2xs uppercase tracking-meta text-ink-3">
+				<span className="text-ink-2">{msg.lang}</span>
+				{msg.status === "running" ? <Loader2 className="h-3 w-3 animate-spin text-accent" /> : null}
+				{msg.exitCode !== undefined ? (
+					<span
+						className={cn(
+							"rounded bg-paper-3 px-1 py-0.5 normal-case tracking-normal",
+							msg.exitCode === 0 ? "text-ink-3" : "text-danger",
+						)}
+					>
+						exit {msg.exitCode}
+					</span>
+				) : null}
+				{msg.cancelled ? <span className="text-warn">· cancelled</span> : null}
+				{msg.truncated ? <span className="text-ink-4">· truncated</span> : null}
+				{msg.excludeFromContext ? <span className="text-thinking">· not sent to model</span> : null}
+			</div>
+			<div className="flex gap-2 font-mono text-xs">
+				<span className="shrink-0 text-accent">{sigil}</span>
+				<span className="whitespace-pre-wrap break-words text-ink">{msg.code}</span>
+			</div>
+			{msg.output ? <Pre>{msg.output}</Pre> : null}
+			{msg.error ? (
+				<div className="border-l-2 border-danger pl-3 font-mono text-xs text-danger">{msg.error}</div>
+			) : null}
 		</div>
 	);
 }

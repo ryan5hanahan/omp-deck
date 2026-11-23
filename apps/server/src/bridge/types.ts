@@ -2,6 +2,7 @@ import type {
 	AgentMessageJson,
 	AgentSessionEventJson,
 	ContextUsage,
+	ExecLang,
 	ExtUiDialogResponse,
 	ImageAttachment,
 	ModelInfo,
@@ -138,6 +139,15 @@ export interface SessionHandle {
 		images?: import("@omp-deck/protocol").ImageAttachment[],
 	): Promise<boolean>;
 	abort(): Promise<void>;
+	/**
+	 * Composer `!` / `$` execution via the SDK's `executeBash` / `executePython`.
+	 * Emits `exec_start`, `exec_chunk`s, then the recorded message as synthetic
+	 * `message_start` + `message_end` (both with `execId`) or one `exec_error`.
+	 * Resolves when the execution ends; failures are reported as `exec_error`.
+	 */
+	execute(lang: ExecLang, code: string, opts: { excludeFromContext: boolean }): Promise<void>;
+	/** Abort the running composer execution; no-op when none is running. */
+	abortExec(): Promise<void>;
 	setName(name: string): Promise<void>;
 	/**
 	 * Trigger manual compaction with optional focus instructions. Resolves once

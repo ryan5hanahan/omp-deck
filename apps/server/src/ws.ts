@@ -100,6 +100,14 @@ export class WsHub {
 				await this.handleAbort(ws, frame.sessionId);
 				return;
 
+			case "exec":
+				this.handleExec(ws, frame);
+				return;
+
+			case "abort_exec":
+				await this.handleAbortExec(ws, frame.sessionId);
+				return;
+
 			case "clear_queue":
 				this.handleClearQueue(ws, frame.sessionId);
 				return;
@@ -278,6 +286,34 @@ export class WsHub {
 			await handle.abort();
 		} catch (err) {
 			send(ws, { type: "error", sessionId, error: `abort failed: ${String(err)}` });
+		}
+	}
+
+	/** Composer-only `!` / `$` execution; Telegram prompts never take this path. */
+	private handleExec(ws: ServerWebSocket<ConnectionData>, frame: Extract<ClientFrame, { type: "exec" }>): void {
+		const handle = this.bridge.getSession(frame.sessionId);
+		if (!handle) {
+			send(ws, { type: "error", sessionId: frame.sessionId, error: "session not active" });
+			return;
+		}
+		this.bridge.bumpActivity(frame.sessionId);
+		// Not awaited, like prompts: the execution outlives this frame and reports through exec_* events.
+		handle.execute(frame.lang, frame.code, { excludeFromContext: frame.excludeFromContext }).catch((err) => {
+			send(ws, { type: "error", sessionId: frame.sessionId, error: `exec failed: ${String(err)}` });
+		});
+	}
+
+	private async handleAbortExec(ws: ServerWebSocket<ConnectionData>, sessionId: string): Promise<void> {
+		const handle = this.bridge.getSession(sessionId);
+		if (!handle) {
+			send(ws, { type: "error", sessionId, error: "session not active" });
+			return;
+		}
+		this.bridge.bumpActivity(sessionId);
+		try {
+			await handle.abortExec();
+		} catch (err) {
+			send(ws, { type: "error", sessionId, error: `abort_exec failed: ${String(err)}` });
 		}
 	}
 

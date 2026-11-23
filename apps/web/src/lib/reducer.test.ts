@@ -223,3 +223,77 @@ describe("reducer queuedPrompts snapshot hydration", () => {
 		expect(s.queuedPrompts[1]?.behavior).toBe("steer");
 	});
 });
+
+describe("reducer composer exec cards (F10)", () => {
+	const recorded = {
+		role: "bashExecution",
+		command: "ls",
+		output: "a\nb\n",
+		exitCode: 0,
+		cancelled: false,
+		truncated: false,
+		timestamp: 1700000000500,
+	};
+	const start = { type: "exec_start", execId: "x1", lang: "bash", code: "ls", excludeFromContext: true } as never;
+	const chunk = (text: string) => ({ type: "exec_chunk", execId: "x1", chunk: text }) as never;
+
+	test("snapshot ingest turns recorded executions into done exec cards", () => {
+		const s = initSession({
+			sessionId: "s1",
+			cwd: "/tmp/x",
+			isStreaming: false,
+			messages: [
+				recorded,
+				{
+					role: "pythonExecution",
+					code: "1+1",
+					output: "2",
+					exitCode: 0,
+					cancelled: false,
+					truncated: true,
+					excludeFromContext: true,
+					timestamp: 2,
+				},
+			],
+			todoPhases: [],
+		} as never);
+		const done = { kind: "exec", status: "done", exitCode: 0, cancelled: false } as const;
+		expect(s.messages).toEqual([
+			{ ...done, id: "exec-1700000000500", lang: "bash", code: "ls", output: "a\nb\n", truncated: false, excludeFromContext: false, timestamp: 1700000000500 },
+			{ ...done, id: "exec-2", lang: "python", code: "1+1", output: "2", truncated: true, excludeFromContext: true, timestamp: 2 },
+		]);
+	});
+
+	test("exec_start pushes a running card and exec_chunk appends output", () => {
+		let s = applyEvent(fresh(), start);
+		s = applyEvent(s, chunk("a\n"));
+		s = applyEvent(s, chunk("b\n"));
+		expect(s.messages).toEqual([
+			{ kind: "exec", id: "x1", lang: "bash", code: "ls", output: "a\nb\n", status: "running", excludeFromContext: true },
+		]);
+	});
+
+	test("message_start/message_end with execId finalize the card and add no bubble", () => {
+		let s = applyEvent(applyEvent(fresh(), start), chunk("partial"));
+		s = applyEvent(s, { type: "message_start", message: recorded, execId: "x1" } as never);
+		s = applyEvent(s, { type: "message_end", message: recorded, execId: "x1" } as never);
+		expect(s.messages).toHaveLength(1);
+		expect(s.messages[0]).toMatchObject({ id: "x1", status: "done", output: "a\nb\n", exitCode: 0, timestamp: 1700000000500, excludeFromContext: true });
+	});
+
+	test("a snapshot-style copy of a finalized live card is not duplicated", () => {
+		let s = applyEvent(fresh(), start);
+		s = applyEvent(s, { type: "message_end", message: recorded, execId: "x1" } as never);
+		s = applyEvent(s, { type: "message_start", message: recorded } as never);
+		expect(s.messages).toHaveLength(1);
+		expect(s.messages[0]).toMatchObject({ id: "x1" });
+	});
+
+	test("exec_error marks the card failed; unknown execId falls back to a notice", () => {
+		let s = applyEvent(fresh(), start);
+		s = applyEvent(s, { type: "exec_error", execId: "x1", error: "busy" } as never);
+		expect(s.messages[0]).toMatchObject({ id: "x1", status: "error", error: "busy" });
+		s = applyEvent(s, { type: "exec_error", execId: "nope", error: "kernel down" } as never);
+		expect(s.messages[1]).toMatchObject({ role: "notice", level: "error", message: "kernel down", source: "exec" });
+	});
+});

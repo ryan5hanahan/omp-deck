@@ -6,12 +6,19 @@
  * boundary stays narrow.
  */
 
-import type { AgentSessionEventJson, SessionSnapshot } from "@omp-deck/protocol";
+import type {
+	AgentSessionEventJson,
+	ExecChunkEvent,
+	ExecErrorEvent,
+	ExecStartEvent,
+	SessionSnapshot,
+} from "@omp-deck/protocol";
 
 import type {
 	AssistantContentBlock,
 	AssistantMsg,
 	ChatMessage,
+	ExecMsg,
 	ImageBlock,
 	NoticeMsg,
 	QueuedPrompt,
@@ -107,6 +114,8 @@ export function applyEvent(state: SessionUi, event: AgentSessionEventJson): Sess
 		case "message_start": {
 			const msg = (event as any).message;
 			if (!msg) return state;
+			// Composer executions: finalize the exec card, never a user/assistant bubble.
+			if (typeof event.execId === "string") return finalizeExec(state, event.execId, msg);
 			const next = { ...state, messages: state.messages.slice() };
 			ingestMessage(next, msg);
 			return next;
@@ -119,7 +128,39 @@ export function applyEvent(state: SessionUi, event: AgentSessionEventJson): Sess
 		case "message_end": {
 			const msg = (event as any).message;
 			if (!msg) return state;
+			if (typeof event.execId === "string") return finalizeExec(state, event.execId, msg);
 			return finalizeMessage(state, msg);
+		}
+
+		// ─── Composer executions (synthetic events emitted by the bridge) ─
+		case "exec_start": {
+			const ev = event as Partial<ExecStartEvent>;
+			if (typeof ev.execId !== "string") return state;
+			const card: ExecMsg = {
+				kind: "exec",
+				id: ev.execId,
+				lang: ev.lang === "python" ? "python" : "bash",
+				code: typeof ev.code === "string" ? ev.code : "",
+				output: "",
+				status: "running",
+				excludeFromContext: ev.excludeFromContext === true,
+			};
+			return { ...state, messages: [...state.messages, card] };
+		}
+		case "exec_chunk": {
+			const ev = event as Partial<ExecChunkEvent>;
+			if (typeof ev.execId !== "string" || typeof ev.chunk !== "string") return state;
+			const chunk = ev.chunk;
+			return patchExec(state, ev.execId, (m) => ({ ...m, output: m.output + chunk })) ?? state;
+		}
+		case "exec_error": {
+			const ev = event as Partial<ExecErrorEvent>;
+			if (typeof ev.execId !== "string") return state;
+			const error = typeof ev.error === "string" ? ev.error : "execution failed";
+			return (
+				patchExec(state, ev.execId, (m) => ({ ...m, status: "error", error })) ??
+				pushNotice(state, { level: "error", message: error, source: "exec" })
+			);
 		}
 
 		// ─── Tool execution ────────────────────────────────────────────────
@@ -455,6 +496,27 @@ function ingestMessage(state: SessionUi, msg: any): void {
 					};
 			return;
 		}
+		case "bashExecution":
+		case "pythonExecution": {
+			const recorded = recordedExec(msg);
+			// A live card finalized from `onRecorded` has the same timestamp as its later snapshot copy.
+			if (
+				recorded.timestamp !== undefined &&
+				state.messages.some((m) => "kind" in m && m.timestamp === recorded.timestamp)
+			) {
+				return;
+			}
+			const bash = msg.role === "bashExecution";
+			state.messages.push({
+				kind: "exec",
+				id: recorded.timestamp !== undefined ? `exec-${recorded.timestamp}` : nextId("exec"),
+				lang: bash ? "bash" : "python",
+				code: String((bash ? msg.command : msg.code) ?? ""),
+				excludeFromContext: msg.excludeFromContext === true,
+				...recorded,
+			});
+			return;
+		}
 		default:
 			return;
 	}
@@ -465,7 +527,7 @@ function updateAssistantMessage(state: SessionUi, msg: any): SessionUi {
 	// Walk backward to find the last assistant message.
 	for (let i = messages.length - 1; i >= 0; i--) {
 		const m = messages[i];
-		if (m && m.role === "assistant") {
+		if (m && "role" in m && m.role === "assistant") {
 			const updated: AssistantMsg = {
 				...m,
 				blocks: extractAssistantBlocks(msg.content),
@@ -495,7 +557,7 @@ function finalizeMessage(state: SessionUi, msg: any): SessionUi {
 	const messages = state.messages.slice();
 	for (let i = messages.length - 1; i >= 0; i--) {
 		const m = messages[i];
-		if (m && m.role === "assistant") {
+		if (m && "role" in m && m.role === "assistant") {
 			messages[i] = {
 				...m,
 				blocks: extractAssistantBlocks(msg.content),
@@ -517,6 +579,37 @@ function finalizeMessage(state: SessionUi, msg: any): SessionUi {
 		}
 	}
 	return state;
+}
+
+/** Terminal fields of an exec card from an SDK-recorded `bashExecution` / `pythonExecution` message. */
+function recordedExec(msg: Record<string, unknown>) {
+	return {
+		output: typeof msg.output === "string" ? msg.output : "",
+		status: "done" as const,
+		exitCode: typeof msg.exitCode === "number" ? msg.exitCode : undefined,
+		cancelled: msg.cancelled === true,
+		truncated: msg.truncated === true,
+		timestamp: typeof msg.timestamp === "number" ? msg.timestamp : undefined,
+	};
+}
+
+/** Replaces exec card `execId` with `patch(card)`; null when no such card exists. */
+function patchExec(state: SessionUi, execId: string, patch: (m: ExecMsg) => ExecMsg): SessionUi | null {
+	const i = state.messages.findIndex((m) => "kind" in m && m.id === execId);
+	const card = state.messages[i];
+	if (!card || !("kind" in card)) return null;
+	const messages = state.messages.slice();
+	messages[i] = patch(card);
+	return { ...state, messages };
+}
+
+function finalizeExec(state: SessionUi, execId: string, msg: Record<string, unknown>): SessionUi {
+	const patched = patchExec(state, execId, (m) => ({ ...m, ...recordedExec(msg) }));
+	if (patched) return patched;
+	// No live card (e.g. snapshot taken mid-execution): ingest like a snapshot copy, de-duped by timestamp.
+	const next = { ...state, messages: state.messages.slice() };
+	ingestMessage(next, msg);
+	return next;
 }
 
 function extractAssistantBlocks(content: unknown): AssistantContentBlock[] {
