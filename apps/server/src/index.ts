@@ -127,6 +127,8 @@ async function main(): Promise<void> {
 	server = Bun.serve<ConnectionData>({
 		hostname: config.host,
 		port: config.port,
+		// MCP reconnect/reauth can wait out a server's 30s connect timeout; Bun's 10s default drops them.
+		idleTimeout: 60,
 		fetch(req, srv) {
 			const rejected = rejectReason(req, allowedHosts);
 			if (rejected) {

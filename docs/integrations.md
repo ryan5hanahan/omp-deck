@@ -86,7 +86,12 @@ Google's APIs.
   curl -LsSf https://astral.sh/uv/install.sh | sh   # macOS / Linux
   brew install uv                                   # or Homebrew
   uvx --version                                     # check
+  uvx workspace-mcp --help                          # pre-download workspace-mcp once
   ```
+
+  Run the last command once before adding the server: the first `uvx` start
+  downloads several hundred MB, which can outlast the 30-second MCP connect
+  timeout, leaving the server in `error` until a later attempt finishes it.
 
   `uvx` must be on the `PATH` of the deck process. If the deck runs as a
   service (launchd, systemd) and cannot find it, put the absolute path (for
