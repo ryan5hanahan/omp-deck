@@ -226,10 +226,12 @@ export class InProcessAgentBridge implements AgentBridge {
 			},
 			getMcpManager: () => getMcpService().getManager(),
 		});
-		if (opts.mcpServers) {
-			const names = scoped.mcpTools?.map((tool) => tool.name).join(", ");
+		if (opts.mcpServers || opts.tools) {
+			// A tools allowlist restricts the session, so its MCP tools travel as custom tools.
+			const names = (scoped.customTools ?? scoped.mcpTools)?.map((tool) => tool.name).join(", ");
 			log.info(`${opts.label}: MCP tools handed to session: ${names || "none"}`);
 		}
+		if (opts.tools) log.info(`${opts.label}: session restricted to tools: ${scoped.toolNames?.join(", ") || "none"}`);
 
 		opts.signal.throwIfAborted();
 		const { session } = await createAgentSession({

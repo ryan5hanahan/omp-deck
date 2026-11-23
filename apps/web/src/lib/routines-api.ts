@@ -1,5 +1,6 @@
 import type {
 	CreateRoutineRequest,
+	InstallTemplateResponse,
 	ListRoutineRunsResponse,
 	ListRoutineStepRunsResponse,
 	ListRoutinesResponse,
@@ -115,8 +116,8 @@ export const routinesApi = {
 		list(): Promise<{ templates: TemplateSummary[] }> {
 			return req<{ templates: TemplateSummary[] }>("/routine-templates");
 		},
-		install(slug: string): Promise<Routine> {
-			return req<Routine>(`/routine-templates/${encodeURIComponent(slug)}`, { method: "POST" });
+		install(slug: string): Promise<InstallTemplateResponse> {
+			return req<InstallTemplateResponse>(`/routine-templates/${encodeURIComponent(slug)}`, { method: "POST" });
 		},
 	},
 	rotateWebhookSecret(id: string): Promise<{ ok: boolean; secret: string; path: string }> {

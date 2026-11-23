@@ -41,6 +41,7 @@ export async function executeAgentStep(
 			model: step.model,
 			skills: step.skills_allowed,
 			mcpServers: step.mcp_servers_allowed,
+			tools: step.tools_allowed,
 			outputSchema: step.structured_output?.schema,
 			signal,
 		});

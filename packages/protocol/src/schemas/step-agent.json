@@ -44,6 +44,11 @@
           "type": "array",
           "items": { "type": "string" },
           "description": "Restrict the agent's MCP tool surface to these server ids. Default (omitted): all installed MCP servers available."
+        },
+        "tools_allowed": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 },
+          "description": "Restrict the agent's built-in tools (read, bash, edit, ...) to this allowlist. Default (omitted): the SDK's default tool set. [] = no built-in tools. MCP tools still follow mcp_servers_allowed, and yield stays available with structured_output. An unknown name fails the step before any LLM call."
         }
       }
     }

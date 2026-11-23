@@ -57,14 +57,14 @@ templating).
 | type        | use                                                                                      |
 | ----------- | ---------------------------------------------------------------------------------------- |
 | `run`       | shell out to a command, capture stdout/stderr                                            |
-| `agent`     | prompt the omp SDK; costs LLM tokens                                                     |
+| `agent`     | run a headless omp agent session inside the deck; costs LLM tokens (see [Agent steps](#agent-steps)) |
 | `write`     | write a templated string to a file (overwrite or append)                                 |
 | `http`      | GET / POST / PUT / PATCH / DELETE against a URL; internal calls get an HMAC bearer token |
 | `deck`      | mutate deck-native state without hand-rolling API calls (`create_inbox_item`, `create_task`, `move_task`, `promote_inbox_item_to_task`) |
 | `transform` | JS expression in a quickjs sandbox; sets `steps.<id>.json`                               |
 | `set_state` | UPSERT key/value pairs into the routine's persistent state                               |
 | `wait`      | sleep N seconds (useful between polling steps)                                           |
-| `mcp`       | call one tool on an MCP server the deck can see (`mcp.json` and other discovered configs) |
+| `mcp`       | call one tool on an MCP server the deck can see (`mcp.json` and other discovered configs); install servers on the [Integrations page](./integrations.md) |
 
 Every step type has the shared fields:
 
@@ -74,6 +74,35 @@ Every step type has the shared fields:
 - `on_failure` — `abort` (default), `continue`, `retry`
 - `retry` — `{ times, backoff: linear | exponential, max_delay_secs?, after_retry? }`
 - `timeout_secs` — per-step wall-clock cap
+
+### Agent steps
+
+An `agent` step runs inside the deck process as a headless omp session,
+through the same SDK the chat uses. The session lives in memory (no session
+file), and its final assistant text becomes the step's `stdout`.
+
+- `skills_allowed`, `mcp_servers_allowed` and `tools_allowed` are enforced.
+  Omitted means everything the deck can see, `[]` means none, and a list
+  means only those names. A listed MCP server that isn't installed fails the
+  step before any LLM call.
+- `tools_allowed` names built-in tools (`read`, `grep`, `bash`, `edit`,
+  `write`, `web_search`, ...). With it set, the session gets exactly those
+  built-ins: no extension, memory or skill-management tools, and nothing the
+  SDK would otherwise add on its own. MCP tools still follow
+  `mcp_servers_allowed`, and `yield` stays available with `structured_output`.
+  An unknown name fails the step before any LLM call, and the error lists the
+  valid names. Without `tools_allowed` the session keeps the SDK's default
+  tools, `bash` included.
+- Give an agent step that reads untrusted input (email, web pages, issue
+  text) `tools_allowed: []` and the narrowest `mcp_servers_allowed`, and do
+  the side effects in deterministic `mcp`/`deck` steps after it. A prompt can
+  tell the model what not to do, but only the allowlists stop it.
+- With `structured_output`, the model returns its result through the `yield`
+  tool and the value lands in `steps.<id>.json`. A run that never yields falls
+  back to parsing the final text as JSON. Unless `strict: false`, a result
+  that doesn't match the schema fails the step.
+- Tokens and cost come from the session's own usage stats and count against
+  the routine's [budget](#budget).
 
 ## Templating
 
@@ -180,8 +209,9 @@ What happens when a trigger fires while a previous run is in flight:
 excess the runner hard-aborts with `abort_reason: 'budget'` and persists
 partial results.
 
-Cost estimation comes from a static price table — treat it as an estimate,
-not an invoice. Your LLM vendor's bill is authoritative.
+Agent-step tokens and cost come from the agent session's own usage stats
+(the SDK's model pricing). Treat the cost as an estimate, not an invoice;
+your LLM vendor's bill is authoritative.
 
 ## Cross-run state
 
@@ -245,17 +275,33 @@ The server validates the YAML against the JSON Schemas in
 `packages/protocol/src/schemas/` and returns 400 with a list of schema
 errors if anything is off.
 
-## Limitations in V1
+## V1.5 additions
 
-- No "test this step in isolation" runner yet — full re-run is the only
-  way to debug. Coming in V2.
-- Windows console codepage mangles em-dashes in `agent` step stdout
-  (cosmetic; the briefing is fully usable).
+- **`mcp` step**: calls one tool on an installed MCP server; the result lands
+  in `steps.<id>.json`.
+- **Integrations page** (`/integrations`): add, enable, test and remove MCP
+  servers, with a Google Workspace tile (Gmail, Drive, Calendar via
+  [taylorwilsdon/google_workspace_mcp](https://github.com/taylorwilsdon/google_workspace_mcp)).
+  Setup guide: [Integrations](./integrations.md).
+- **`inbox-triager` template**: Gmail triage every 15 minutes during work
+  hours, on top of the Google Workspace server
+  ([details](./integrations.md#the-inbox-triager-template)). Installing a
+  template that needs an MCP server you don't have shows a banner linking to
+  Integrations.
+- **MCP-aware step forms**: the `mcp` step picks its server and tool from
+  dropdowns and generates inputs from the tool's schema; agent steps suggest
+  allowlist entries from installed servers and skills.
+- **Drag-and-drop reorder**: drag a step card by its handle (the arrows still
+  work). A move that makes a step read a later step's output shows a warning
+  with **Revert**. **Duplicate** copies a step in place.
+- **Event triggers**: routines fire on deck events; see
+  [Event triggers](#event-triggers).
+- **`max_parallel`**: caps concurrent runs under `concurrency: parallel`.
+  Fires above the cap queue (depth 10).
+- **Agent-step allowlists enforced in-process**: see
+  [Agent steps](#agent-steps).
 
-## What's next (V1.5)
+## Next (V2)
 
-- Workspace MCP integration: Gmail / Calendar / Drive / Docs via the
-  [taylorwilsdon/google_workspace_mcp](https://github.com/taylorwilsdon/google_workspace_mcp)
-  server. Inbox-triager is the V1.5 proof point.
-- Real `mcp` step type with `server` + `tool` dropdowns sourced from
-  installed MCP servers.
+- A "test this step in isolation" runner. Until then a full re-run is the
+  only way to debug a step.

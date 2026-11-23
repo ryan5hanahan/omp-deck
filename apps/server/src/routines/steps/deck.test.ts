@@ -36,6 +36,7 @@ function ctx(): RunContext {
 			started: "2026-05-21T00:00:00.000Z",
 			iso_started: "2026-05-21T00:00:00.000Z",
 			date: "2026-05-21",
+			epoch: 1779321600,
 			trigger_kind: "manual",
 		},
 		trigger: {},

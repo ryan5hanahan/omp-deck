@@ -49,6 +49,7 @@ function ctx(steps: RunContext["steps"] = {}): RunContext {
 			started: "2026-11-23T00:00:00.000Z",
 			iso_started: "2026-11-23T00:00:00.000Z",
 			date: "2026-11-23",
+			epoch: 1795392000,
 			trigger_kind: "manual",
 		},
 		trigger: {},

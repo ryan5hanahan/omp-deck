@@ -60,6 +60,8 @@ Classify each unit of work into ONE of these. Always prefer the most specific.
 | `wait` | sleep N seconds between polls | `duration_secs` |
 | `mcp` | call one tool on an installed MCP server (result in `steps.<id>.json`) | `server`, `tool`, `args` |
 
+`agent` steps take three optional allowlists, each omitted = default, `[]` = none, a list = only those names: `skills_allowed`, `mcp_servers_allowed` (server names) and `tools_allowed` (built-in tools such as `read`, `grep`, `bash`, `edit`, `write`; an unknown name fails the step before the LLM call). An agent step that reads untrusted input (email, web pages, webhook payloads) gets `tools_allowed: []` and the narrowest `mcp_servers_allowed` (usually `[]`); put every side effect in a later deterministic `mcp` / `deck` step.
+
 ### `deck` step actions (read = slim summary; write = mutation)
 
 Read (returns slim records — `{id, ref, displayId, title, stateId, updatedAt, createdAt}` for tasks; `{id, kind, title, source, createdAt, processedAt}` for inbox):

@@ -116,6 +116,7 @@ export async function runV1Pipeline(input: {
 			started: startedAtIso,
 			iso_started: startedAtIso,
 			date: startedAtIso.slice(0, 10),
+			epoch: Math.floor(startedAt.getTime() / 1000),
 			trigger_kind: triggerKind,
 		},
 		trigger: triggerPayload,

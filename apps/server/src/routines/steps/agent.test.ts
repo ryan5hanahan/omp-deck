@@ -39,6 +39,7 @@ function ctx(): RunContext {
 			started: "2026-11-23T00:00:00.000Z",
 			iso_started: "2026-11-23T00:00:00.000Z",
 			date: "2026-11-23",
+			epoch: 1795392000,
 			trigger_kind: "manual",
 		},
 		trigger: {},
@@ -54,7 +55,12 @@ const signal = new AbortController().signal;
 describe("executeAgentStep", () => {
 	test("renders the prompt, passes the allowlists, and records real usage", async () => {
 		const { run, calls } = fakeRunner({ text: "## Briefing" });
-		const step = agentStep({ model: "claude-sonnet-4-6", skills_allowed: ["deck-inbox"], mcp_servers_allowed: ["fake"] });
+		const step = agentStep({
+			model: "claude-sonnet-4-6",
+			skills_allowed: ["deck-inbox"],
+			mcp_servers_allowed: ["fake"],
+			tools_allowed: ["read"],
+		});
 		const result = await executeAgentStep(step, ctx(), signal, "/sandbox", run);
 
 		expect(calls).toEqual([
@@ -65,6 +71,7 @@ describe("executeAgentStep", () => {
 				model: "claude-sonnet-4-6",
 				skills: ["deck-inbox"],
 				mcpServers: ["fake"],
+				tools: ["read"],
 				outputSchema: undefined,
 				signal,
 			},

@@ -98,6 +98,8 @@ export interface HeadlessRunOptions {
 	skills?: string[];
 	/** MCP server names. Omitted = the SDK's own discovery, `[]` = MCP off. */
 	mcpServers?: string[];
+	/** Built-in tool names. Omitted = the SDK's default set, `[]` = none (`yield` stays with `outputSchema`). */
+	tools?: string[];
 	/** JSON Schema the model's `yield` result is checked against by the SDK. */
 	outputSchema?: unknown;
 	signal: AbortSignal;

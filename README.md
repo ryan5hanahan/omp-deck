@@ -110,6 +110,7 @@ The short version: **Claude Code** is the polished vendor experience for Claude.
 - [Slash commands](./docs/slash-commands.md) — deck `/task` + `/plan`, SDK builtins, user/project markdown commands.
 - [Marketplaces](./docs/marketplaces.md) — catalog seeding, install semantics, capability badges.
 - [Skills](./docs/skills.md) — `/skills` view, plugin → skill hierarchy, scope semantics, REST surface.
+- [Integrations](./docs/integrations.md) — MCP servers page, Google Workspace setup, `inbox-triager` routine.
 - [Telegram bridge](./docs/telegram.md) — DM-driven agent from your phone.
 - [Themes](./docs/themes.md) — Paper / Slate / Horizon / adding more.
 - [Start command template](./docs/start-command-template.md) — define `/start` for auto-orientation.

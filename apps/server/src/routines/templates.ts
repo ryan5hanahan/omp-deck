@@ -2,15 +2,18 @@
  * Routine templates. Each `.yaml` file under `apps/server/src/templates/` is a
  * pre-authored V1 routine spec the user can install via:
  *
- *   GET  /api/routines/templates           — list available templates
- *   POST /api/routines/templates/:slug      — install + return the routine row
+ *   GET  /api/routine-templates            — list available templates
+ *   POST /api/routine-templates/:slug      — install; returns the routine row plus
+ *                                            `missingIntegrations` (MCP servers it
+ *                                            references that aren't installed)
  *
  * Installation is plain `createV1Routine` with the parsed spec. Templates ship
  * with `enabled: false` by default so a fresh install doesn't fire unscheduled
  * agent runs against the user's BYOK keys.
  *
- * V1 ships one template (`daily-briefing`); the visual builder's marketplace
- * (Phase 3 / V2) surfaces them in a curated catalog with screenshots + tags.
+ * Ships `daily-briefing` and `inbox-triager` (needs the `google-workspace` MCP
+ * server); the visual builder's marketplace (Phase 3 / V2) surfaces them in a
+ * curated catalog with screenshots + tags.
  */
 
 import * as fs from "node:fs";
@@ -71,4 +74,14 @@ export function loadTemplate(slug: string): { spec: RoutineSpec; specYaml: strin
 	} catch {
 		return null;
 	}
+}
+
+/** MCP servers a spec needs: every `mcp` step's `server` and agent `mcp_servers_allowed`, unique, in spec order. */
+export function referencedMcpServers(spec: RoutineSpec): string[] {
+	const names = new Set<string>();
+	for (const step of spec.steps) {
+		if (step.type === "mcp") names.add(step.server);
+		else if (step.type === "agent") for (const name of step.mcp_servers_allowed ?? []) names.add(name);
+	}
+	return [...names];
 }

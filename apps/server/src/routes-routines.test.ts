@@ -6,7 +6,7 @@ import { afterEach, beforeEach, expect, spyOn, test } from "bun:test";
 import { Hono } from "hono";
 import { parse as parseYaml, stringify } from "yaml";
 
-import type { Routine, RoutineSpec } from "@omp-deck/protocol";
+import type { InstallTemplateResponse, Routine, RoutineSpec } from "@omp-deck/protocol";
 
 import { closeDb, openDb } from "./db/index.ts";
 import { getWebhookSecretByPath } from "./db/routine-step-runs.ts";
@@ -160,4 +160,48 @@ test("installing the same template repeatedly suffixes the webhook path", async 
 		"/hooks/daily-briefing-manual-2",
 		"/hooks/daily-briefing-manual-3",
 	]);
+});
+
+/** Installs `slug` through a router whose MCP server listing is `list`; counts listing calls. */
+async function installWith(
+	slug: string,
+	list: () => Promise<string[]>,
+): Promise<{ body: InstallTemplateResponse; listed: number }> {
+	let listed = 0;
+	const custom = new Hono();
+	custom.route(
+		"/",
+		buildRoutinesRouter(runner, {
+			listMcpServerNames: () => {
+				listed++;
+				return list();
+			},
+		}),
+	);
+	const res = await custom.request(`/routine-templates/${slug}`, { method: "POST" });
+	expect(res.status).toBe(201);
+	return { body: (await res.json()) as InstallTemplateResponse, listed };
+}
+
+test("template install reports referenced MCP servers that are not installed", async () => {
+	const missing = await installWith("inbox-triager", async () => []);
+	expect(missing.body.missingIntegrations).toEqual(["google-workspace"]);
+	expect(missing.body.enabled).toBe(false);
+	expect(getRoutine(missing.body.id)?.name).toBe("inbox-triager");
+
+	const installed = await installWith("inbox-triager", async () => ["other", "google-workspace"]);
+	expect(installed.body.missingIntegrations).toEqual([]);
+
+	// A listing failure still installs, and reports every referenced server as missing.
+	const failed = await installWith("inbox-triager", async () => {
+		throw new Error("mcp config unreadable");
+	});
+	expect(failed.body.missingIntegrations).toEqual(["google-workspace"]);
+	expect(getRoutine(failed.body.id)).toBeDefined();
+});
+
+test("a template without MCP references installs with no missing integrations and no listing", async () => {
+	const { body, listed } = await installWith("daily-briefing", async () => []);
+	expect(body.missingIntegrations).toEqual([]);
+	expect(listed).toBe(0);
 });

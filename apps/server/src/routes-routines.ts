@@ -5,6 +5,7 @@ import { parse as parseYaml, parseDocument } from "yaml";
 
 import type {
 	CreateRoutineRequest,
+	InstallTemplateResponse,
 	ListRoutineRunsResponse,
 	ListRoutineStepRunsResponse,
 	ListRoutinesResponse,
@@ -33,11 +34,19 @@ import {
 } from "./db/routine-step-runs.ts";
 import type { RoutinesRunner } from "./routines-runner.ts";
 import { hashSecretForStorage } from "./routes-hooks.ts";
-import { listTemplates, loadTemplate } from "./routines/templates.ts";
+import { getMcpService } from "./mcp-service.ts";
+import { listTemplates, loadTemplate, referencedMcpServers } from "./routines/templates.ts";
 
 const log = logger("routes:routines");
 
-export function buildRoutinesRouter(runner: RoutinesRunner): Hono {
+export interface RoutinesRouterOptions {
+	/** Installed MCP server names, for a template install's `missingIntegrations`. Tests inject one. */
+	listMcpServerNames?: () => Promise<string[]>;
+}
+
+export function buildRoutinesRouter(runner: RoutinesRunner, options: RoutinesRouterOptions = {}): Hono {
+	const listMcpServerNames =
+		options.listMcpServerNames ?? (async () => (await getMcpService().listServers()).map((s) => s.name));
 	const app = new Hono();
 
 	app.get("/routines", (c) => {
@@ -228,7 +237,7 @@ export function buildRoutinesRouter(runner: RoutinesRunner): Hono {
 		return c.json({ templates: listTemplates() });
 	});
 
-	app.post("/routine-templates/:slug", (c) => {
+	app.post("/routine-templates/:slug", async (c) => {
 		const slug = c.req.param("slug");
 		const loaded = loadTemplate(slug);
 		if (!loaded) return c.json({ error: "template not found" }, 404);
@@ -258,7 +267,17 @@ export function buildRoutinesRouter(runner: RoutinesRunner): Hono {
 		});
 		syncWebhookTrigger(loaded.spec, routine.id);
 		runner.schedule(routine);
-		return c.json(routine, 201);
+		let missingIntegrations = referencedMcpServers(loaded.spec);
+		if (missingIntegrations.length > 0) {
+			try {
+				const installed = new Set(await listMcpServerNames());
+				missingIntegrations = missingIntegrations.filter((name) => !installed.has(name));
+			} catch (err) {
+				log.warn(`template ${slug}: listing MCP servers failed, reporting every referenced server as missing`, err);
+			}
+		}
+		const body: InstallTemplateResponse = { ...routine, missingIntegrations };
+		return c.json(body, 201);
 	});
 
 	/**

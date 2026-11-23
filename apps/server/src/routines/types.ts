@@ -38,6 +38,8 @@ export interface RunContext {
 		started: string;
 		iso_started: string;
 		date: string;
+		/** Run start in unix seconds (Gmail's `after:` takes this, not ISO). */
+		epoch: number;
 		trigger_kind: "cron" | "manual" | "webhook" | "event";
 	};
 	trigger: Record<string, unknown>;

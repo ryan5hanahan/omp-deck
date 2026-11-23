@@ -17,6 +17,7 @@ import {
 	withArg,
 } from "@/lib/mcp-args-form";
 import { skillsApi } from "@/lib/skills-api";
+import { type AllowlistKey, allowlistHint, withAllowlist } from "@/lib/step-allowlist";
 
 import {
 	ComboSelect,
@@ -129,36 +130,74 @@ export function AgentStepForm({ step, onChange }: FormProps<"agent">) {
 				/>
 			</Field>
 			<div className="grid grid-cols-2 gap-2">
-				<Field label="skills_allowed">
-					<TagInput
-						values={step.skills_allowed ?? []}
-						onChange={(v) => {
-							const next = { ...step };
-							if (v.length === 0) delete next.skills_allowed;
-							else next.skills_allowed = v;
-							onChange(next);
-						}}
-						placeholder="skill-name"
-						suggestions={skillNames}
-						ariaLabel="skills_allowed"
-					/>
-				</Field>
-				<Field label="mcp_servers_allowed">
-					<TagInput
-						values={step.mcp_servers_allowed ?? []}
-						onChange={(v) => {
-							const next = { ...step };
-							if (v.length === 0) delete next.mcp_servers_allowed;
-							else next.mcp_servers_allowed = v;
-							onChange(next);
-						}}
-						placeholder="server-name"
-						suggestions={serverNames}
-						ariaLabel="mcp_servers_allowed"
-					/>
-				</Field>
+				<AllowlistField
+					name="skills_allowed"
+					values={step.skills_allowed}
+					onChange={(v) => onChange(withAllowlist(step, "skills_allowed", v))}
+					unrestricted="all skills"
+					placeholder="skill-name"
+					suggestions={skillNames}
+				/>
+				<AllowlistField
+					name="mcp_servers_allowed"
+					values={step.mcp_servers_allowed}
+					onChange={(v) => onChange(withAllowlist(step, "mcp_servers_allowed", v))}
+					unrestricted="all servers"
+					placeholder="server-name"
+					suggestions={serverNames}
+				/>
+				<AllowlistField
+					name="tools_allowed"
+					values={step.tools_allowed}
+					onChange={(v) => onChange(withAllowlist(step, "tools_allowed", v))}
+					unrestricted="default tools"
+					placeholder="read"
+				/>
 			</div>
 		</div>
+	);
+}
+
+/**
+ * An allowlist with an explicit restrict switch. Unchecked omits the key (unrestricted);
+ * checked keeps an array, and removing the last tag leaves `[]` (none allowed) rather than unrestricting.
+ */
+function AllowlistField({
+	name,
+	values,
+	onChange,
+	unrestricted,
+	placeholder,
+	suggestions,
+}: {
+	name: AllowlistKey;
+	values: string[] | undefined;
+	onChange: (next: string[] | undefined) => void;
+	unrestricted: string;
+	placeholder: string;
+	suggestions?: readonly string[];
+}) {
+	return (
+		<Field label={name} hint={allowlistHint(values, unrestricted)}>
+			<label className="mb-1 flex items-center gap-2 font-mono text-2xs text-ink-2">
+				<input
+					type="checkbox"
+					checked={values !== undefined}
+					onChange={(e) => onChange(e.target.checked ? [] : undefined)}
+					aria-label={`Restrict ${name}`}
+				/>
+				<span>restrict</span>
+			</label>
+			{values !== undefined ? (
+				<TagInput
+					values={values}
+					onChange={onChange}
+					placeholder={placeholder}
+					suggestions={suggestions}
+					ariaLabel={name}
+				/>
+			) : null}
+		</Field>
 	);
 }
 

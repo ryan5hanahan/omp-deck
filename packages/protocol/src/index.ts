@@ -1300,6 +1300,12 @@ export interface Routine {
 	tags?: string[];
 }
 
+/**
+ * `POST /api/routine-templates/:slug` (201). `missingIntegrations`: MCP servers the template
+ * references (`mcp` steps, `mcp_servers_allowed`) that are not installed; empty when none.
+ */
+export type InstallTemplateResponse = Routine & { missingIntegrations: string[] };
+
 export interface CreateRoutineRequest {
 	name: string;
 	description?: string;
@@ -1417,6 +1423,8 @@ export type RoutineStep =
 			structured_output?: { schema: unknown; strict?: boolean };
 			skills_allowed?: string[];
 			mcp_servers_allowed?: string[];
+			/** Built-in tool names. Omitted = the SDK default set, `[]` = none. MCP tools follow `mcp_servers_allowed`. */
+			tools_allowed?: string[];
 		})
 	| (RoutineStepCommon & {
 			type: "write";

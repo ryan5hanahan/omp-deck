@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { useSearchParams } from "react-router-dom";
-import { Clock, Plus, Power, Zap } from "lucide-react";
+import { Link, useSearchParams } from "react-router-dom";
+import { Clock, Plus, Power, X, Zap } from "lucide-react";
 import type { Routine } from "@omp-deck/protocol";
 
 import { Layout } from "@/components/Layout";
@@ -19,6 +19,7 @@ export function RoutinesView() {
 	const [metrics, setMetrics] = useState<Record<string, RoutineMetrics>>({});
 	const [loading, setLoading] = useState(true);
 	const [error, setError] = useState<string | undefined>();
+	const [missing, setMissing] = useState<{ template: string; servers: string[] } | undefined>();
 
 	const refresh = useCallback(async (): Promise<void> => {
 		try {
@@ -145,6 +146,11 @@ export function RoutinesView() {
 			onInstallTemplate={async (slug) => {
 				try {
 					const created = await routinesApi.templates.install(slug);
+					setMissing(
+						created.missingIntegrations.length > 0
+							? { template: created.name, servers: created.missingIntegrations }
+							: undefined,
+					);
 					await refresh();
 					openEditor(created);
 				} catch (e) {
@@ -165,7 +171,50 @@ export function RoutinesView() {
 		<IndexInspector routines={routines} metrics={metrics} />
 	);
 
-	return <Layout sidebar={sidebar} main={mainPane} inspector={inspector} topBar={null} />;
+	const main = missing ? (
+		<div className="flex min-h-0 flex-1 flex-col">
+			<MissingIntegrationsBanner
+				template={missing.template}
+				servers={missing.servers}
+				onDismiss={() => setMissing(undefined)}
+			/>
+			<div className="min-h-0 flex-1">{mainPane}</div>
+		</div>
+	) : (
+		mainPane
+	);
+
+	return <Layout sidebar={sidebar} main={main} inspector={inspector} topBar={null} />;
+}
+
+function MissingIntegrationsBanner({
+	template,
+	servers,
+	onDismiss,
+}: {
+	template: string;
+	servers: string[];
+	onDismiss: () => void;
+}) {
+	return (
+		<div role="status" className="flex shrink-0 items-center gap-2 border-b border-warn/40 bg-warn/5 px-3 py-1.5 text-xs text-ink">
+			<span className="min-w-0 flex-1">
+				<span className="font-medium">{template}</span> needs MCP servers that aren't installed:{" "}
+				<span className="font-mono">{servers.join(", ")}</span>.{" "}
+				<Link to="/integrations" className="text-accent hover:underline">
+					Open Integrations
+				</Link>
+			</span>
+			<button
+				type="button"
+				onClick={onDismiss}
+				aria-label="Dismiss"
+				className="shrink-0 rounded p-0.5 text-ink-3 hover:bg-paper-3 hover:text-ink"
+			>
+				<X className="h-3.5 w-3.5" />
+			</button>
+		</div>
+	);
 }
 
 async function loadMetrics(routines: Routine[]): Promise<Record<string, RoutineMetrics>> {
