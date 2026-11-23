@@ -195,6 +195,9 @@ export class RoutinesRunner {
 		if (decision.kind === "cancel") {
 			decision.toCancel.abort();
 		}
+		if (decision.kind === "queue") {
+			await decision.release;
+		}
 
 		log.info(`firing V1 routine ${routine.name} (${spec.steps.length} steps, trigger=${trigger})`);
 		const config = loadConfig();

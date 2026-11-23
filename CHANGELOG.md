@@ -12,6 +12,8 @@ All notable changes to omp-deck. The format is loosely based on
 
 ### Fixed
 
+- **Routine `agent` steps with `model:` failed every run.** The step passed `-m`, which omp rejects as an unknown flag; it now passes `--model`. The shipped `daily-briefing` template sets a model, so it never ran its LLM step.
+- **`concurrency: queue` did not queue.** A queued run started at once instead of waiting for the active run, so `queue` behaved like `parallel`. It now waits for the active run to finish.
 - **CI web build ran nothing on Bun 1.4.** `bun --cwd apps/web run build` prints `bun run` usage and exits 0; the step now runs `bun run --cwd apps/web build`.
 - **SDK 19.1.0 package root failed to import** (upstream #20058). `patches/@oh-my-pi%2Fpi-coding-agent@19.1.0.patch` backports upstream `295ea02a1`; remove it with the next SDK bump.
 

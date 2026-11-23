@@ -44,7 +44,7 @@ export async function executeAgentStep(
 
 	const args = ["-p", prompt];
 	if (step.model) {
-		args.push("-m", step.model);
+		args.push("--model", step.model);
 	}
 
 	try {
