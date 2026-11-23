@@ -61,7 +61,7 @@ These are deck-only — the TUI doesn't have them:
 - **Kanban** with display IDs, drag-and-drop, configurable columns.
 - **Inbox** quick-capture with promote-to-task.
 - **Knowledge base** — `/kb` cockpit over a local `~/kb` markdown wiki (tree / viewer / editor / Obsidian-style graph / full-text + Ctrl-P search / wikilink resolution + backlinks).
-- **Routines V1** — multi-step pipelines (`run` / `agent` / `http` / `write` / `deck` / `mcp` / `transform` / `wait` / `set_state`) with `cron` / `webhook` / `manual` / `event` triggers, a visual canvas builder, and per-step run observability.
+- **Routines V1** — multi-step pipelines (`run` / `agent` / `http` / `write` / `deck` / `mcp` / `transform` / `wait` / `set_state`) with `cron` / `webhook` / `manual` / `event` triggers (event triggers fire on new inbox items, cross-column task moves, finished routine runs and Telegram messages), a visual canvas builder, and per-step run observability.
 - **Settings → Env** with masked secret store and audit log.
 - **Messaging bridges** (Telegram now; Slack/Discord-shaped to come).
 - **Live broadcasts** — agent or external scripts mutating `/api/tasks`, the KB tree, or installed skills push WS frames that cause every open client to refresh instantly without polling.

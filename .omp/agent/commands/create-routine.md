@@ -20,8 +20,15 @@ Work top-to-bottom. Default values are in parentheses.
 
 ### Trigger
 - Recurring time-based → `- cron: "0 7 * * *"` (5-field UTC; set `timezone:` if local clock matters)
-- External system poke → `- webhook: { path: /hooks/<slug>, secret_env: <ENV_VAR> }`
+- External system poke → `- webhook: { path: /hooks/<slug>, secret_env: <ENV_VAR> }` (at most one per routine; a path already used by another routine fails the save with 409)
 - Human-driven → `- manual: {}`
+- Something happens in the deck → `- event: { source: <source>, type: <type>, filter: <js expr> }` (`type` and `filter` optional; omit `type` to match every type):
+  - `deck_inbox` / `created` → `{item}`
+  - `deck_task` / `moved` → `{task, fromStateId, toStateId}` (cross-column moves only; `s_done` is the Done column)
+  - `routine_finished` / `success` | `failed` | `aborted` → `{routineId, routineName, runId, status, abortReason?}`
+  - `telegram` / `message` → `{chatId, fromId, text}`
+  - `filter` is a sandboxed JS boolean over `event = { source, type, ...payload }` (100 ms cap; a throw = no match), e.g. `'event.toStateId === "s_done"'`. Steps read the same object as `{{ trigger.payload.<field> }}`.
+  - A routine never fires on its own events, and routine→routine chains stop at depth 3.
 - Multiple sources are fine — list every entry the engine should fire on.
 
 ### Idempotency

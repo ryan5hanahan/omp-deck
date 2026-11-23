@@ -9,14 +9,47 @@ import type {
 
 const BASE = "/api";
 
+/** A non-ok response. `message` is the body's JSON `error` string when it has one. */
+export class RoutinesApiError extends Error {
+	readonly status: number;
+	/** Parsed JSON body; `undefined` when the body is not JSON. */
+	readonly body: unknown;
+
+	constructor(message: string, status: number, body: unknown) {
+		super(message);
+		this.status = status;
+		this.body = body;
+	}
+}
+
+/** 409 body from create/update when another routine owns the spec's webhook path. */
+export interface WebhookConflictBody {
+	error: string;
+	path: string;
+	routine: { id: string; name: string };
+}
+
+export function webhookConflict(e: unknown): WebhookConflictBody | undefined {
+	if (!(e instanceof RoutinesApiError) || e.status !== 409) return undefined;
+	const b = e.body as Partial<WebhookConflictBody> | null | undefined;
+	return typeof b?.path === "string" && typeof b.routine?.name === "string" ? (b as WebhookConflictBody) : undefined;
+}
+
 async function req<T>(path: string, init?: RequestInit): Promise<T> {
 	const res = await fetch(`${BASE}${path}`, {
 		...init,
 		headers: { "content-type": "application/json", ...(init?.headers ?? {}) },
 	});
 	if (!res.ok) {
-		const body = await res.text().catch(() => "");
-		throw new Error(`HTTP ${res.status} ${path}: ${body}`);
+		const text = await res.text().catch(() => "");
+		let body: unknown;
+		try {
+			body = JSON.parse(text);
+		} catch {
+			body = undefined;
+		}
+		const error = typeof body === "object" && body !== null && "error" in body ? body.error : undefined;
+		throw new RoutinesApiError(typeof error === "string" ? error : `HTTP ${res.status} ${path}: ${text}`, res.status, body);
 	}
 	return (await res.json()) as T;
 }

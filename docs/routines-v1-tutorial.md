@@ -3,8 +3,8 @@
 V1 routines are multi-step pipelines: a single routine can fetch data, run
 an LLM against it, write the result somewhere, and persist a snippet of
 state for the next run. Each routine can have multiple triggers (cron,
-webhook, manual) and a budget cap. This walk-through gets you from zero to a
-working daily-briefing in a few minutes.
+webhook, manual, event) and a budget cap. This walk-through gets you from
+zero to a working daily-briefing in a few minutes.
 
 ## Quickest path: install the daily-briefing template
 
@@ -39,7 +39,7 @@ a new **capture item in the deck's native Inbox** (`/inbox`, kind=`capture`).
    (legacy V0). New routines default to pipeline.
 3. **Settings** tab: set a name, optionally a description, concurrency,
    timezone, tags, and budget caps.
-4. **Triggers** tab: add at least one trigger (cron / webhook / manual).
+4. **Triggers** tab: add at least one trigger (cron / webhook / manual / event).
    Cron entries get a live "next 3 runs" preview against the IANA timezone
    you set.
 5. **Steps** tab: click **+ Add step** and pick a type. Each card has the
@@ -83,7 +83,7 @@ The runner exposes a `{{ expr }}` template surface for string fields:
 - `{{ run.date }}` — `YYYY-MM-DD` in the routine's timezone
 - `{{ run.started }}` — ISO start timestamp
 - `{{ trigger.kind }}` — `cron` | `manual` | `webhook` | `event`
-- `{{ trigger.payload.<field> }}` — webhook body or manual params
+- `{{ trigger.payload.<field> }}` — webhook body, manual params, or the event (see [Event triggers](#event-triggers))
 - `{{ steps.<id>.json.<field> }}` — structured output (e.g. parsed HTTP response)
 - `{{ steps.<id>.stdout }}` — captured stdout text
 - `{{ state.<key> }}` — persisted state from prior runs (or `set_state` earlier this run)
@@ -110,6 +110,9 @@ trigger:
       path: /hooks/refresh
       secret_env: REFRESH_SECRET
   - manual: {}
+  - event:
+      source: deck_task
+      type: moved
 ```
 
 Cron expressions are 5-field standard (minute / hour / day / month / weekday).
@@ -125,6 +128,41 @@ X-Routine-Signature: sha256=<hex>
 ```
 
 where `<hex>` is `HMAC-SHA256(secret, body)`.
+
+A routine can have one webhook trigger, and a path belongs to one routine.
+Saving a routine whose webhook path another routine already uses fails with
+`409 {error, path, routine: {id, name}}` and saves nothing; the builder shows
+the conflict on the webhook trigger. Installing a template whose path is
+taken appends `-2`, `-3`, … instead.
+
+### Event triggers
+
+An `event` trigger fires the routine when something happens inside the deck:
+
+```yaml
+trigger:
+  - event:
+      source: deck_task
+      type: moved                              # optional; omit to match every type
+      filter: 'event.toStateId === "s_done"'   # optional
+```
+
+| `source` / `type` | Payload | Emitted when |
+|---|---|---|
+| `deck_inbox` / `created` | `{item}` | an inbox item is created (UI, slash command, API or a routine `deck` step) |
+| `deck_task` / `moved` | `{task, fromStateId, toStateId}` | a task moves to another column; reordering within a column does not fire |
+| `routine_finished` / `success`, `failed`, `aborted` | `{routineId, routineName, runId, status, abortReason?}` | a routine run ends |
+| `telegram` / `message` | `{chatId, fromId, text}` | the Telegram bridge receives a message |
+
+- `filter` is a JS boolean expression evaluated in the sandbox against
+  `event = { source, type, ...payload }`, with a 100 ms cap. The routine
+  fires only on a truthy result; an expression that throws counts as no
+  match and is logged.
+- The run gets the same object as its trigger payload, e.g.
+  `{{ trigger.payload.task.title }}` or `{{ trigger.payload.text }}`.
+- Loop guard: a routine is never triggered by its own events (from its own
+  steps or its own `routine_finished`), and a chain of routines triggering
+  routines stops at depth 3. Dropped events are logged as warnings.
 
 ## Concurrency
 

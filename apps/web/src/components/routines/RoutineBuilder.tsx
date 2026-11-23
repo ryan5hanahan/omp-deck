@@ -35,7 +35,7 @@ import {
 	type ValidationError,
 } from "@omp-deck/protocol";
 
-import { routinesApi } from "@/lib/routines-api";
+import { routinesApi, webhookConflict } from "@/lib/routines-api";
 import { formatDurationMs } from "@/lib/utils";
 
 import { compileGraph } from "./canvas/graph-compile";
@@ -131,6 +131,10 @@ export function RoutineBuilder({ routine, onSaved, onError }: Props) {
 		specToSave: RoutineSpec;
 		specYaml: string;
 	} | null>(null);
+	// A save 409 (webhook path owned by another routine), shown on the webhook
+	// trigger until the trigger list it was raised for is replaced.
+	const [pathConflict, setPathConflict] = useState<{ trigger: RoutineTrigger[]; message: string }>();
+	const webhookError = pathConflict?.trigger === spec.trigger ? pathConflict.message : undefined;
 
 	// When the parent passes a different routine, reset everything.
 	const lastRoutineId = useRef<string | undefined>(routine?.id);
@@ -272,7 +276,15 @@ export function RoutineBuilder({ routine, onSaved, onError }: Props) {
 				onSaved(created);
 			}
 			setPendingSave(null);
+			setPathConflict(undefined);
 		} catch (e) {
+			const conflict = webhookConflict(e);
+			if (conflict) {
+				setPathConflict({
+					trigger: specToSave.trigger,
+					message: `Path ${conflict.path} is already used by routine ${conflict.routine.name}`,
+				});
+			}
 			onError(String(e));
 		} finally {
 			setBusy(false);
@@ -426,7 +438,7 @@ export function RoutineBuilder({ routine, onSaved, onError }: Props) {
 				) : null}
 
 				{tab === "triggers" ? (
-					<TriggerPicker triggers={spec.trigger} onChange={onChangeTriggers} />
+					<TriggerPicker triggers={spec.trigger} onChange={onChangeTriggers} webhookError={webhookError} />
 				) : null}
 
 				{tab === "settings" ? (

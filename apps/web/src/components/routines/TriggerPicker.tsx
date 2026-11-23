@@ -1,18 +1,37 @@
 /**
- * Trigger picker. Edits a routine's `trigger:` array (cron, webhook, manual).
- * Event triggers are reserved in the schema for V1.5 — not surfaced here yet.
+ * Trigger picker. Edits a routine's `trigger:` array (cron, webhook, manual, event).
  */
 import { useEffect, useState } from "react";
 import { Plus, Trash2 } from "lucide-react";
 
 import type { RoutineTrigger } from "@omp-deck/protocol";
 
-import { Field, NumInput as _NumInput, TextInput } from "./form-primitives";
+import { newWebhookPath } from "@/lib/webhook-path";
+
+import { Field, NumInput as _NumInput, Select, TextInput } from "./form-primitives";
 
 interface Props {
 	triggers: RoutineTrigger[];
 	onChange: (next: RoutineTrigger[]) => void;
+	/** Save error for the webhook trigger (path owned by another routine). */
+	webhookError?: string;
 }
+
+const KINDS = ["cron", "webhook", "manual", "event"] as const;
+type TriggerKind = (typeof KINDS)[number];
+type EventSpec = Extract<RoutineTrigger, { event: unknown }>["event"];
+
+/** Sources the server emits (`apps/server/src/deck-events.ts`): types, payload fields, a filter example. */
+const EVENT_SOURCES: Record<string, { types: readonly string[]; fields: string; filter: string }> = {
+	deck_inbox: { types: ["created"], fields: "item", filter: 'event.item.kind === "idea"' },
+	deck_task: { types: ["moved"], fields: "task, fromStateId, toStateId", filter: 'event.toStateId === "s_done"' },
+	routine_finished: {
+		types: ["success", "failed", "aborted"],
+		fields: "routineId, routineName, runId, status, abortReason",
+		filter: 'event.routineName === "daily-briefing"',
+	},
+	telegram: { types: ["message"], fields: "chatId, fromId, text", filter: 'event.text.startsWith("/triage")' },
+};
 
 const PRESET_CRONS: ReadonlyArray<{ label: string; expr: string }> = [
 	{ label: "every minute", expr: "* * * * *" },
@@ -22,14 +41,13 @@ const PRESET_CRONS: ReadonlyArray<{ label: string; expr: string }> = [
 	{ label: "weekly Sun 9am", expr: "0 9 * * 0" },
 ];
 
-export function TriggerPicker({ triggers, onChange }: Props) {
-	function add(kind: "cron" | "webhook" | "manual"): void {
+export function TriggerPicker({ triggers, onChange, webhookError }: Props) {
+	function add(kind: TriggerKind): void {
 		const next = triggers.slice();
 		if (kind === "cron") next.push({ cron: "0 9 * * *" });
-		else if (kind === "webhook") {
-			const path = `/hooks/${Math.random().toString(36).slice(2, 10)}`;
-			next.push({ webhook: { path, secret_env: "ROUTINE_WEBHOOK_SECRET" } });
-		} else next.push({ manual: {} });
+		else if (kind === "webhook") next.push({ webhook: { path: newWebhookPath(), secret_env: "ROUTINE_WEBHOOK_SECRET" } });
+		else if (kind === "event") next.push({ event: { source: "deck_task", type: "moved" } });
+		else next.push({ manual: {} });
 		onChange(next);
 	}
 	function remove(idx: number): void {
@@ -51,21 +69,31 @@ export function TriggerPicker({ triggers, onChange }: Props) {
 				</div>
 			) : null}
 			{triggers.map((t, idx) => (
-				<TriggerCard key={idx} trigger={t} onChange={(v) => replace(idx, v)} onRemove={() => remove(idx)} />
+				<TriggerCard
+					key={idx}
+					trigger={t}
+					webhookError={webhookError}
+					onChange={(v) => replace(idx, v)}
+					onRemove={() => remove(idx)}
+				/>
 			))}
 			<div className="flex flex-wrap gap-1.5">
-				<button type="button" onClick={() => add("cron")} className="btn-ghost h-7 px-2 text-2xs">
-					<Plus className="h-3 w-3" />
-					cron
-				</button>
-				<button type="button" onClick={() => add("webhook")} className="btn-ghost h-7 px-2 text-2xs">
-					<Plus className="h-3 w-3" />
-					webhook
-				</button>
-				<button type="button" onClick={() => add("manual")} className="btn-ghost h-7 px-2 text-2xs">
-					<Plus className="h-3 w-3" />
-					manual
-				</button>
+				{KINDS.map((kind) => {
+					const blocked = kind === "webhook" && triggers.some((t) => "webhook" in t);
+					return (
+						<button
+							key={kind}
+							type="button"
+							onClick={() => add(kind)}
+							disabled={blocked}
+							title={blocked ? "A routine can have at most one webhook trigger" : undefined}
+							className="btn-ghost h-7 px-2 text-2xs disabled:opacity-40"
+						>
+							<Plus className="h-3 w-3" />
+							{kind}
+						</button>
+					);
+				})}
 			</div>
 		</div>
 	);
@@ -73,14 +101,16 @@ export function TriggerPicker({ triggers, onChange }: Props) {
 
 function TriggerCard({
 	trigger,
+	webhookError,
 	onChange,
 	onRemove,
 }: {
 	trigger: RoutineTrigger;
+	webhookError?: string;
 	onChange: (next: RoutineTrigger) => void;
 	onRemove: () => void;
 }) {
-	const kind: "cron" | "webhook" | "manual" | "event" = (() => {
+	const kind: TriggerKind = (() => {
 		if ("cron" in trigger) return "cron";
 		if ("webhook" in trigger) return "webhook";
 		if ("manual" in trigger) return "manual";
@@ -100,6 +130,7 @@ function TriggerCard({
 					<WebhookEditor
 						path={trigger.webhook.path}
 						secretEnv={trigger.webhook.secret_env}
+						error={webhookError}
 						onChange={(path, secret_env) => onChange({ webhook: { path, secret_env } })}
 					/>
 				) : null}
@@ -108,12 +139,65 @@ function TriggerCard({
 						Fired via the Run-now button or <code>POST /api/routines/:id/run</code>.
 					</div>
 				) : null}
-				{"event" in trigger ? (
-					<div className="font-mono text-2xs text-ink-4">event triggers ship in V1.5</div>
-				) : null}
+				{"event" in trigger ? <EventEditor event={trigger.event} onChange={(event) => onChange({ event })} /> : null}
 			</div>
 		</div>
 	);
+}
+
+function EventEditor({ event, onChange }: { event: EventSpec; onChange: (next: EventSpec) => void }) {
+	const known = EVENT_SOURCES[event.source];
+	const sources = withCurrent(Object.keys(EVENT_SOURCES), event.source);
+	const types = withCurrent(known?.types ?? [], event.type);
+	// The spec omits empty optional keys; "" in the type select means any type.
+	function set(next: EventSpec): void {
+		onChange({
+			source: next.source,
+			...(next.type ? { type: next.type } : {}),
+			...(next.filter?.trim() ? { filter: next.filter } : {}),
+		});
+	}
+	return (
+		<div className="space-y-1.5">
+			<div className="grid grid-cols-2 gap-1.5">
+				<Field label="source">
+					<Select
+						value={event.source}
+						onChange={(source) => set({ source, filter: event.filter })}
+						options={sources.map((s) => ({ value: s, label: s }))}
+					/>
+				</Field>
+				<Field label="type">
+					<Select
+						value={event.type ?? ""}
+						onChange={(type) => set({ ...event, type })}
+						options={[{ value: "", label: "any" }, ...types.map((t) => ({ value: t, label: t }))]}
+					/>
+				</Field>
+			</div>
+			<Field label="filter (optional JS expression over event)">
+				<TextInput
+					value={event.filter ?? ""}
+					onChange={(filter) => set({ ...event, filter })}
+					placeholder={known?.filter}
+					mono
+				/>
+			</Field>
+			<div className="font-mono text-2xs text-ink-3">
+				{known ? (
+					<>
+						<code>event</code> has <code>source, type, {known.fields}</code>.{" "}
+					</>
+				) : null}
+				A routine never fires on its own events; chains stop at depth 3.
+			</div>
+		</div>
+	);
+}
+
+/** Keeps a value set in YAML that the picker doesn't list, so the select never rewrites it. */
+function withCurrent(list: readonly string[], current: string | undefined): readonly string[] {
+	return current && !list.includes(current) ? [...list, current] : list;
 }
 
 function CronEditor({ expr, onChange }: { expr: string; onChange: (v: string) => void }) {
@@ -179,15 +263,17 @@ function CronEditor({ expr, onChange }: { expr: string; onChange: (v: string) =>
 function WebhookEditor({
 	path,
 	secretEnv,
+	error,
 	onChange,
 }: {
 	path: string;
 	secretEnv: string;
+	error?: string;
 	onChange: (path: string, secretEnv: string) => void;
 }) {
 	return (
 		<div className="space-y-1.5">
-			<Field label="path">
+			<Field label="path" hint={error} tone="danger">
 				<TextInput value={path} onChange={(v) => onChange(v, secretEnv)} placeholder="/hooks/my-routine" mono />
 			</Field>
 			<Field label="secret_env (env var name holding the shared secret)">
