@@ -359,7 +359,8 @@ function GoogleWorkspaceTile({ installed, onSetUp }: { installed: boolean; onSet
 				<div className="text-sm font-medium text-ink">Google Workspace</div>
 				<div className="mt-0.5 font-mono text-2xs text-ink-3">uvx workspace-mcp --tools gmail drive calendar</div>
 				<div className="mt-1 text-xs text-ink-3">
-					Gmail, Drive and Calendar tools. Needs a Google Cloud OAuth client ID and secret.{" "}
+					Gmail, Drive and Calendar tools. Needs a Google Cloud OAuth client ID and secret, and your Google email
+					(<code className="font-mono">USER_GOOGLE_EMAIL</code>).{" "}
 					<a
 						href={SETUP_GUIDE_URL}
 						target="_blank"

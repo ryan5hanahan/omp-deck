@@ -50,7 +50,7 @@ describe("buildMcpServerConfig", () => {
 		expect(buildMcpServerConfig(GOOGLE_WORKSPACE_FORM)).toEqual({
 			command: "uvx",
 			args: ["workspace-mcp", "--tools", "gmail", "drive", "calendar"],
-			env: { GOOGLE_OAUTH_CLIENT_ID: "", GOOGLE_OAUTH_CLIENT_SECRET: "" },
+			env: { GOOGLE_OAUTH_CLIENT_ID: "", GOOGLE_OAUTH_CLIENT_SECRET: "", USER_GOOGLE_EMAIL: "" },
 		});
 		expect(GOOGLE_WORKSPACE_FORM.scope).toBe("user");
 	});

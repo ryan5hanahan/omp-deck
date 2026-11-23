@@ -31,7 +31,7 @@ export const GOOGLE_WORKSPACE_FORM: McpServerForm = {
 	name: "google-workspace",
 	command: "uvx",
 	args: "workspace-mcp --tools gmail drive calendar",
-	env: "GOOGLE_OAUTH_CLIENT_ID=\nGOOGLE_OAUTH_CLIENT_SECRET=",
+	env: "GOOGLE_OAUTH_CLIENT_ID=\nGOOGLE_OAUTH_CLIENT_SECRET=\nUSER_GOOGLE_EMAIL=",
 };
 
 function parseArgs(text: string): string[] {
