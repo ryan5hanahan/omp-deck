@@ -182,7 +182,7 @@ export class RoutinesRunner {
 		}
 
 		const run = startRun(routine.id, trigger);
-		const decision = this.concurrency.decide(routine.id, run.id, routine.concurrency);
+		const decision = this.concurrency.decide(routine.id, run.id, routine.concurrency, spec.max_parallel);
 		if (decision.kind === "skip") {
 			finalizeRun(run.id, {
 				endedAt: new Date().toISOString(),

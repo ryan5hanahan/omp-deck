@@ -34,6 +34,11 @@
       "enum": ["skip", "queue", "cancel-previous", "parallel"],
       "default": "skip"
     },
+    "max_parallel": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Cap on concurrent runs when concurrency is parallel. Fires above the cap queue (depth 10). Omit for unlimited."
+    },
     "timezone": {
       "type": "string",
       "description": "IANA timezone for cron evaluation. Defaults to the system timezone."
@@ -85,6 +90,11 @@
     "layout": {
       "$ref": "https://omp-deck.app/schemas/routine-layout.json"
     }
+  },
+  "if": { "required": ["max_parallel"] },
+  "then": {
+    "required": ["concurrency"],
+    "properties": { "concurrency": { "const": "parallel" } }
   },
   "additionalProperties": false
 }

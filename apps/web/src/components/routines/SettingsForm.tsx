@@ -61,7 +61,12 @@ export function SettingsForm({ spec, onChange }: Props) {
 			<Field label="concurrency">
 				<select
 					value={spec.concurrency ?? "skip"}
-					onChange={(e) => patchSpec({ concurrency: e.target.value as RoutineConcurrency })}
+					onChange={(e) => {
+						const next = { ...spec, concurrency: e.target.value as RoutineConcurrency };
+						// The schema rejects max_parallel under any other policy.
+						if (next.concurrency !== "parallel") delete next.max_parallel;
+						onChange(next);
+					}}
 					className="field h-7 w-full px-2 font-mono text-2xs"
 				>
 					{CONCURRENCY_OPTIONS.map((o) => (
@@ -71,6 +76,20 @@ export function SettingsForm({ spec, onChange }: Props) {
 					))}
 				</select>
 			</Field>
+			{spec.concurrency === "parallel" && (
+				<Field label="max_parallel (empty = unlimited)">
+					<NumInput
+						value={spec.max_parallel}
+						onChange={(v) => {
+							const next = { ...spec };
+							if (v === undefined) delete next.max_parallel;
+							else next.max_parallel = v;
+							onChange(next);
+						}}
+						placeholder="unlimited"
+					/>
+				</Field>
+			)}
 			<Field label="timezone (IANA)">
 				<TextInput
 					value={spec.timezone ?? ""}

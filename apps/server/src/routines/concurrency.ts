@@ -4,8 +4,8 @@
  *   - skip            (default) drop new trigger when a run is in flight
  *   - queue           queue subsequent invocations, max depth 10
  *   - cancel-previous abort the in-flight run, start a new one
- *   - parallel        run them all (V1 only allows the keyword; the spec
- *                     extension for "parallel: N" is V1.5)
+ *   - parallel        run concurrently, up to the spec's `max_parallel`
+ *                     (unlimited when unset); fires above the cap queue
  *
  * The runner asks the controller whether to start; gets back an action
  * along with (for cancel-previous) the AbortController of the in-flight run.
@@ -34,10 +34,11 @@ export type StartDecision =
 export class ConcurrencyController {
 	private routines = new Map<string, RoutineEntry>();
 
-	/** Decide what to do when a trigger fires. The caller MUST invoke `start()` after this returns 'go' (or 'cancel') to actually register the run. */
-	decide(routineId: string, runId: string, policy: RoutineConcurrency): StartDecision {
+	/** Decide what to do when a trigger fires. 'go' and 'cancel' register the run as active before returning; 'queue' registers it when `release` resolves. The caller MUST call `finish()` once the run ends. */
+	decide(routineId: string, runId: string, policy: RoutineConcurrency, maxParallel?: number): StartDecision {
 		const entry = this.entry(routineId);
-		if (entry.active.length === 0 || policy === "parallel") {
+		const slots = policy === "parallel" ? (maxParallel ?? Number.POSITIVE_INFINITY) : 1;
+		if (entry.active.length < slots) {
 			const abort = new AbortController();
 			entry.active.push({ runId, abort });
 			return { kind: "go", abort };
@@ -56,6 +57,8 @@ export class ConcurrencyController {
 				entry.active.push({ runId, abort });
 				return { kind: "cancel", toCancel: prev.abort, abort };
 			}
+			// At the cap, parallel waits for a free slot exactly like queue.
+			case "parallel":
 			case "queue": {
 				if (entry.queued.length >= MAX_QUEUE_DEPTH) {
 					return { kind: "skip", reason: "concurrency_skipped" };

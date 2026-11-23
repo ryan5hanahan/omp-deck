@@ -477,6 +477,35 @@ describe("validateRoutineSpec — layout (V2 canvas)", () => {
 	});
 });
 
+describe("validateRoutineSpec — max_parallel", () => {
+	test("parallel with max_parallel validates", () => {
+		const result = validateRoutineSpec({ ...dailyBriefing, concurrency: "parallel", max_parallel: 3 });
+		expect(result).toEqual({ valid: true });
+	});
+
+	test("max_parallel with a non-parallel policy is rejected at /concurrency", () => {
+		const result = validateRoutineSpec({ ...dailyBriefing, concurrency: "skip", max_parallel: 2 });
+		expect(result.valid).toBe(false);
+		expect(result.errors!.some((e) => e.keyword === "const" && e.path === "/concurrency")).toBe(true);
+	});
+
+	test("max_parallel without a concurrency key is rejected", () => {
+		const { concurrency: _omit, ...spec } = dailyBriefing;
+		const result = validateRoutineSpec({ ...spec, max_parallel: 2 });
+		expect(result.valid).toBe(false);
+		const missing = result.errors!.some(
+			(e) => e.keyword === "required" && e.params.missingProperty === "concurrency",
+		);
+		expect(missing).toBe(true);
+	});
+
+	test("max_parallel 0 is rejected", () => {
+		const result = validateRoutineSpec({ ...dailyBriefing, concurrency: "parallel", max_parallel: 0 });
+		expect(result.valid).toBe(false);
+		expect(result.errors!.some((e) => e.keyword === "minimum" && e.path === "/max_parallel")).toBe(true);
+	});
+});
+
 describe("validateAgainstSchema", () => {
 	test("accepts a draft-07 tool schema and reports the offending field", () => {
 		const schema = {
