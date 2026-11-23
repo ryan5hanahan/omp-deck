@@ -1,5 +1,6 @@
 import type { InboxItem, InboxKind } from "@omp-deck/protocol";
 
+import { emitDeckEvent } from "../deck-events.ts";
 import { getDb, id, nowIso } from "./index.ts";
 
 interface Row {
@@ -79,6 +80,7 @@ export function createInbox(input: {
 		.run(itemId, input.kind, input.title, input.body ?? "", input.source ?? null, now);
 	const out = getInbox(itemId);
 	if (!out) throw new Error("createInbox failed");
+	emitDeckEvent("deck_inbox", "created", { item: out });
 	return out;
 }
 

@@ -8,6 +8,7 @@
 
 import type { Task, TaskState } from "@omp-deck/protocol";
 
+import { emitDeckEvent } from "../deck-events.ts";
 import { getDb, id, nowIso } from "./index.ts";
 
 interface TaskRow {
@@ -352,7 +353,12 @@ export function moveTask(taskId: string, stateId: string, index: number): Task |
 		}
 	})();
 
-	return getTask(taskId);
+	const moved = getTask(taskId);
+	// emitted after commit so listeners never observe a rolled-back move
+	if (crossColumn && moved) {
+		emitDeckEvent("deck_task", "moved", { task: moved, fromStateId: existing.stateId, toStateId: stateId });
+	}
+	return moved;
 }
 
 function renumberColumn(stateId: string): void {

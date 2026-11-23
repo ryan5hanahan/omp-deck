@@ -30,6 +30,10 @@ export class DeckClient {
 		if (!res.ok) throw new Error(`deck delete session failed: ${res.status}`);
 	}
 
+	async postTelegramEvent(event: { chatId: number | string; fromId: number | string; text: string }): Promise<void> {
+		await this.request<{ ok: true }>("/api/events/telegram", { method: "POST", body: JSON.stringify(event) });
+	}
+
 	promptSession(args: {
 		sessionId: string;
 		text: string;

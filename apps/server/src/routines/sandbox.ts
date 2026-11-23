@@ -74,7 +74,8 @@ export async function evaluate(
 				"globalThis.steps = globalThis.context.steps;" +
 				"globalThis.env = globalThis.context.env;" +
 				"globalThis.secrets = globalThis.context.secrets;" +
-				"globalThis.state = globalThis.context.state;",
+				"globalThis.state = globalThis.context.state;" +
+				"globalThis.event = globalThis.context.event;",
 		);
 		if (installResult.error) {
 			const err = vm.dump(installResult.error);

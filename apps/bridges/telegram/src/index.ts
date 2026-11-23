@@ -77,6 +77,12 @@ class TelegramBridge {
 			await this.resetChat(message);
 			return;
 		}
+		if (text) {
+			// fire-and-forget: routine event triggers must never delay or break the chat reply
+			void this.deck
+				.postTelegramEvent({ chatId: message.chat.id, fromId, text })
+				.catch((err) => console.error("telegram event post failed", { chatId: message.chat.id, err }));
+		}
 
 		const photos = message.photo ?? [];
 		if (!text && photos.length === 0) {

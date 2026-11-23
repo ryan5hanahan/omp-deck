@@ -5,8 +5,9 @@
  *
  * Also owns the Cron scheduler. For V0 routines, schedule from `routine.cron`.
  * For V1 routines, parse `spec.trigger` and schedule a Cron per cron-trigger
- * entry. Non-cron triggers (webhook, manual, event) sit passive and are
- * invoked from routes-hooks.ts / routes-routines.ts.
+ * entry. Event triggers are indexed by source and fired from deck events
+ * (deck-events.ts). Webhook and manual triggers sit passive and are invoked
+ * from routes-hooks.ts / routes-routines.ts.
  */
 
 import { Cron } from "croner";
@@ -16,6 +17,7 @@ import * as path from "node:path";
 import type { Routine, RoutineActionKind, RoutineSpec, RoutineTrigger } from "@omp-deck/protocol";
 
 import { logger } from "./log.ts";
+import { emitDeckEvent, onDeckEvent, routineRunScope, type DeckEvent } from "./deck-events.ts";
 import {
 	finishRun,
 	listRoutines,
@@ -24,6 +26,7 @@ import {
 } from "./db/routines.ts";
 import { ConcurrencyController } from "./routines/concurrency.ts";
 import { runV1Pipeline } from "./routines/v1-runner.ts";
+import { evaluate } from "./routines/sandbox.ts";
 import { finalizeRun, insertAbortedRun } from "./db/routine-step-runs.ts";
 import { loadConfig } from "./config.ts";
 
@@ -31,18 +34,30 @@ const log = logger("routines-runner");
 
 const MAX_EXCERPT = 8 * 1024;
 const MAX_RUNTIME_MS = 10 * 60_000;
+/** Loop guard: events emitted by a run this deep in an event chain fire nothing. */
+const MAX_CHAIN_DEPTH = 3;
 
 interface ScheduledCron {
 	cron: Cron;
 	routineId: string;
 }
 
+interface EventTriggerEntry {
+	routineId: string;
+	type?: string;
+	filter?: string;
+}
+
 export class RoutinesRunner {
 	private crons = new Map<string, ScheduledCron[]>();
+	/** Event triggers of enabled routines, keyed by source. */
+	private eventTriggers = new Map<string, EventTriggerEntry[]>();
+	private offDeckEvent: (() => void) | null = null;
 	private disposed = false;
 	readonly concurrency = new ConcurrencyController();
 
 	start(): void {
+		this.offDeckEvent ??= onDeckEvent((event) => this.dispatchEvent(event));
 		const routines = listRoutines();
 		for (const r of routines) {
 			if (r.enabled) this.schedule(r);
@@ -53,6 +68,9 @@ export class RoutinesRunner {
 	dispose(): void {
 		if (this.disposed) return;
 		this.disposed = true;
+		this.offDeckEvent?.();
+		this.offDeckEvent = null;
+		this.eventTriggers.clear();
 		for (const entries of this.crons.values()) {
 			for (const entry of entries) {
 				try {
@@ -69,7 +87,15 @@ export class RoutinesRunner {
 		this.unschedule(r.id);
 		if (!r.enabled) return;
 
-		const cronExprs = collectCronExpressions(r);
+		const triggers = v1Triggers(r);
+		for (const t of triggers) {
+			if (!("event" in t) || typeof t.event?.source !== "string") continue;
+			const list = this.eventTriggers.get(t.event.source) ?? [];
+			list.push({ routineId: r.id, type: t.event.type, filter: t.event.filter });
+			this.eventTriggers.set(t.event.source, list);
+		}
+
+		const cronExprs = collectCronExpressions(r, triggers);
 		if (cronExprs.length === 0) {
 			setRoutineSchedule(r.id, { nextRunAt: null });
 			return;
@@ -102,6 +128,11 @@ export class RoutinesRunner {
 	}
 
 	unschedule(routineId: string): void {
+		for (const [source, list] of this.eventTriggers) {
+			const kept = list.filter((t) => t.routineId !== routineId);
+			if (kept.length > 0) this.eventTriggers.set(source, kept);
+			else this.eventTriggers.delete(source);
+		}
 		const existing = this.crons.get(routineId);
 		if (!existing) return;
 		for (const entry of existing) {
@@ -112,6 +143,39 @@ export class RoutinesRunner {
 			}
 		}
 		this.crons.delete(routineId);
+	}
+
+	/** Deck event listener. Stays sync; filter evaluation and firing run as caught promises. */
+	private dispatchEvent(event: DeckEvent): void {
+		for (const t of this.eventTriggers.get(event.source) ?? []) {
+			if (t.type && t.type !== event.type) continue;
+			if (event.origin?.routineId === t.routineId) {
+				log.warn(`dropped ${event.source}/${event.type} for routine ${t.routineId}: emitted by its own run`);
+				continue;
+			}
+			if (event.origin && event.origin.chainDepth >= MAX_CHAIN_DEPTH) {
+				log.warn(
+					`dropped ${event.source}/${event.type} for routine ${t.routineId}: event chain depth ${event.origin.chainDepth}`,
+				);
+				continue;
+			}
+			void this.fireOnEvent(t, event).catch((err) => log.warn(`event fire failed for routine ${t.routineId}`, err));
+		}
+	}
+
+	private async fireOnEvent(t: EventTriggerEntry, event: DeckEvent): Promise<void> {
+		const payload = { source: event.source, type: event.type, ...event.payload };
+		if (t.filter) {
+			let matched: unknown;
+			try {
+				matched = await evaluate(t.filter, { event: payload }, { timeoutMs: 100 });
+			} catch (err) {
+				log.warn(`event filter for routine ${t.routineId} threw; treating as no match`, err);
+				return;
+			}
+			if (!matched) return;
+		}
+		await this.fire(t.routineId, "event", payload);
 	}
 
 	/** Fire a routine. Branches on specVersion. */
@@ -166,6 +230,8 @@ export class RoutinesRunner {
 		trigger: "cron" | "manual" | "webhook" | "event",
 		payload: Record<string, unknown>,
 	): Promise<void> {
+		const parent = routineRunScope.getStore();
+		const scope = { routineId: routine.id, chainDepth: parent ? parent.chainDepth + 1 : 0 };
 		let spec: RoutineSpec;
 		try {
 			spec = parseYaml(routine.specYaml!) as RoutineSpec;
@@ -201,8 +267,9 @@ export class RoutinesRunner {
 
 		log.info(`firing V1 routine ${routine.name} (${spec.steps.length} steps, trigger=${trigger})`);
 		const config = loadConfig();
-		try {
-			await runV1Pipeline({
+		// Events emitted by the run (and its routine_finished) carry this scope as their origin.
+		await routineRunScope.run(scope, async () => {
+			const result = await runV1Pipeline({
 				routine,
 				spec,
 				runId: run.id,
@@ -214,30 +281,40 @@ export class RoutinesRunner {
 				// so the embedded coding agent can't reach into the user's home
 				// for "context" it wasn't asked about.
 				agentSandboxRoot: path.join(path.dirname(config.dbPath), "routine-runs"),
+			})
+				.catch((err: unknown) => {
+					log.error(`V1 pipeline threw for ${routine.id}`, err);
+					return null;
+				})
+				.finally(() => this.concurrency.finish(routine.id, run.id));
+			if (!result) return;
+			// Emitted only after the slot is released: a listener may start this routine
+			// again and must not be skipped (or queued) behind the run that just ended.
+			emitDeckEvent("routine_finished", result.status, {
+				routineId: routine.id,
+				routineName: routine.name,
+				runId: run.id,
+				status: result.status,
+				...(result.abortReason ? { abortReason: result.abortReason } : {}),
 			});
-		} catch (err) {
-			log.error(`V1 pipeline threw for ${routine.id}`, err);
-		} finally {
-			this.concurrency.finish(routine.id, run.id);
-		}
+		});
 	}
 }
 
-/** Pull every cron expression out of a routine. Handles V0 (`routine.cron`) and V1 (parses spec_yaml). */
-function collectCronExpressions(routine: Routine): string[] {
+/** Triggers of a V1 routine's spec; [] for V0 or unparseable specs. */
+function v1Triggers(routine: Routine): RoutineTrigger[] {
+	if (routine.specVersion !== 1 || !routine.specYaml) return [];
+	try {
+		return (parseYaml(routine.specYaml) as RoutineSpec).trigger ?? [];
+	} catch {
+		return [];
+	}
+}
+
+/** Pull every cron expression out of a routine: V0 `routine.cron`, or the V1 cron triggers. */
+function collectCronExpressions(routine: Routine, triggers: RoutineTrigger[]): string[] {
 	if (routine.specVersion === 1 && routine.specYaml) {
-		try {
-			const spec = parseYaml(routine.specYaml) as RoutineSpec;
-			const out: string[] = [];
-			for (const t of spec.trigger ?? []) {
-				if ("cron" in t && typeof (t as { cron?: unknown }).cron === "string") {
-					out.push((t as RoutineTrigger & { cron: string }).cron);
-				}
-			}
-			return out;
-		} catch {
-			return [];
-		}
+		return triggers.flatMap((t) => ("cron" in t && typeof t.cron === "string" ? [t.cron] : []));
 	}
 	return routine.cron ? [routine.cron] : [];
 }
