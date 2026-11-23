@@ -13,6 +13,9 @@ All notable changes to omp-deck. The format is loosely based on
 - **`!` / `!!` bash and `$` / `$$` Python from the composer**, with the TUI's rules: the doubled sigil keeps the output out of the model's context. Output streams into a card in the chat.
 - **Integrations page.** Lists every MCP server the deck sees (user, project, or discovered elsewhere) with status and tools; add stdio or http/sse servers, enable/disable, test, reauthorize and remove. A Google Workspace tile pre-fills `uvx workspace-mcp`. Backed by a new `/api/mcp`.
 - **Event triggers fire.** Routines can trigger on a new inbox item, a card moving to another column, another routine finishing, or a Telegram message, with an optional JS `filter`. A routine never fires on its own events, and chains stop at depth 3.
+- **MCP-aware step forms.** The `mcp` step picks its server and tool from what is installed and generates inputs for the tool's simple arguments; the args JSON shows parse errors instead of dropping edits. Agent-step allowlists suggest installed servers and skills and keep "none" (`[]`) distinct from "unrestricted".
+- **`inbox-triager` template** (Gmail through the Google Workspace MCP server): triages new mail every 15 minutes in work hours, stars and marks important mail, drafts one reply and files a summary in the deck inbox. The classifier reads untrusted mail with no tools at all. Installing a template now lists MCP servers it needs that aren't installed. Setup guide: `docs/integrations.md`.
+- **`tools_allowed` on agent steps** limits the built-in tools (`[]` = none). The SDK can't add memory, extension or MCP tools back.
 
 ### Changed
 
