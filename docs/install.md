@@ -14,7 +14,7 @@ on this machine.
 
 | Tool | Version | Why |
 |---|---|---|
-| [Bun](https://bun.sh) | ≥ 1.3.14 | Runtime for both the deck server and the web bundler. |
+| [Bun](https://bun.sh) | ≥ 1.4.4 | Runtime for both the deck server and the web bundler. |
 | Git | any recent | To clone the repo. |
 | A modern browser | Chrome / Edge / Firefox / Safari, recent | Renders the deck. WebSocket support is required. |
 

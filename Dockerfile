@@ -22,7 +22,7 @@
 # because `@oh-my-pi/pi-natives` ships prebuilt `.node` binaries linked
 # against glibc's `ld-linux-x86-64.so.2`; Alpine's musl libc would fail
 # to load them at runtime (no `linux-x64-musl` variant exists).
-FROM oven/bun:1.3.14 AS web-build
+FROM oven/bun:1.4.4 AS web-build
 WORKDIR /app
 
 # Workspace manifests first for cache-friendly install. All five must be
@@ -30,6 +30,7 @@ WORKDIR /app
 # the lockfile was generated against — including the telegram bridge,
 # whose runtime is opt-in but whose manifest is part of the lockfile.
 COPY package.json bun.lock* tsconfig.base.json ./
+COPY patches patches
 COPY packages/protocol/package.json packages/protocol/
 COPY apps/web/package.json apps/web/
 COPY apps/server/package.json apps/server/
@@ -44,11 +45,12 @@ WORKDIR /app/apps/web
 RUN bun run build
 
 # ─── Stage 2: runtime ──────────────────────────────────────────────────────
-FROM oven/bun:1.3.14 AS runtime
+FROM oven/bun:1.4.4 AS runtime
 WORKDIR /app
 
 # Re-install with only server-relevant workspace (still pulls protocol).
 COPY package.json bun.lock* tsconfig.base.json ./
+COPY patches patches
 COPY packages/protocol/package.json packages/protocol/
 COPY apps/server/package.json apps/server/
 COPY apps/web/package.json apps/web/

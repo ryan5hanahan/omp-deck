@@ -5,6 +5,16 @@ All notable changes to omp-deck. The format is loosely based on
 
 ## [Unreleased]
 
+### Changed
+
+- **omp SDK 19.1.0, Bun ≥ 1.4.4.** `@oh-my-pi/pi-ai`, `pi-coding-agent` and `pi-tui` move from 18.18.0 to 19.1.0. Engines, the CI matrix and the Docker base image move to Bun 1.4.4, which 19.1.0 requires.
+- **Plan mode sets SDK plan state before rebuilding tools.** 19.1.0 submits plans with `propose`, which it presents only while plan mode is on, so a session without `bash` could not submit a plan under the old order.
+
+### Fixed
+
+- **CI web build ran nothing on Bun 1.4.** `bun --cwd apps/web run build` prints `bun run` usage and exits 0; the step now runs `bun run --cwd apps/web build`.
+- **SDK 19.1.0 package root failed to import** (upstream #20058). `patches/@oh-my-pi%2Fpi-coding-agent@19.1.0.patch` backports upstream `295ea02a1`; remove it with the next SDK bump.
+
 ## [0.5.0] — 2026-05-28 — Cross-platform CI, Linux container, Mac/Linux launcher
 
 Infrastructure release. v0.4.0 advertised macOS and Linux support but had never been empirically verified — every release was "tested on a Windows box, presumed to work elsewhere." v0.5.0 closes that gap: every push to main now runs the gates on all three platforms under the same Bun version, the Docker image actually boots, and Mac/Linux users get a launcher with parity to the Windows one.

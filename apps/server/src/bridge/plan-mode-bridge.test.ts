@@ -36,6 +36,9 @@ class StubSession implements PlanModeSessionSurface {
 	markPlanReferenceSentCount = 0;
 	promptCalls: PromptCall[] = [];
 	setActiveToolsCalls: string[][] = [];
+	/** Whether plan mode was on at each tool rebuild (19.x presents `propose` only then). */
+	planEnabledAtToolSet: boolean[] = [];
+	failToolSet = false;
 	isStreaming = true;
 
 	constructor(initialTools: string[] = ["read", "search", "find", "lsp", "web_search", "edit"]) {
@@ -47,6 +50,8 @@ class StubSession implements PlanModeSessionSurface {
 	}
 
 	async setActiveToolsByName(toolNames: string[]): Promise<void> {
+		if (this.failToolSet) throw new Error("tool set failed");
+		this.planEnabledAtToolSet.push(this.planModeStateCalls.at(-1)?.enabled === true);
 		this.activeTools = [...toolNames];
 		this.setActiveToolsCalls.push([...toolNames]);
 	}
@@ -133,7 +138,7 @@ async function makeHarness(): Promise<Harness> {
 	};
 }
 
-/** Simulate the agent writing `title` to `xd://propose`. */
+/** Simulate the agent submitting `title` with `propose`. */
 async function invokePropose(h: Harness, title = ""): Promise<{
 	resultPromise: Promise<ProposalResult>;
 }> {
@@ -175,6 +180,7 @@ describe("PlanModeBridge", () => {
 			{ enabled: true, planFilePath: "local://PLAN.md", workflow: "parallel" },
 		]);
 		expect(harness.session.proposalHandler).toBeTypeOf("function");
+		expect(harness.session.planEnabledAtToolSet).toEqual([true]);
 		expect(harness.frames).toEqual([
 			{
 				type: "plan_mode_changed",
@@ -223,6 +229,7 @@ describe("PlanModeBridge", () => {
 
 		expect(harness.session.getActiveToolNames()).toEqual(previousTools);
 		expect(harness.session.proposalHandler).toBeNull();
+		expect(harness.session.planEnabledAtToolSet.at(-1)).toBe(false);
 		// First non-undefined state was the enter state; second was undefined on exit.
 		expect(harness.session.planModeStateCalls.at(-1)).toBeUndefined();
 		expect(harness.frames.at(-1)).toEqual({
@@ -236,6 +243,15 @@ describe("PlanModeBridge", () => {
 		const framesAfter = harness.frames.length;
 		await harness.bridge.exit("user_cancelled");
 		expect(harness.frames.length).toBe(framesAfter);
+	});
+
+	it("enter() rolls back plan state when the tool rebuild fails", async () => {
+		harness.session.failToolSet = true;
+		await expect(harness.bridge.enter()).rejects.toThrow("tool set failed");
+		expect(harness.session.planModeStateCalls.at(-1)).toBeUndefined();
+		expect(harness.session.proposalHandler).toBeNull();
+		expect(harness.bridge.isEnabled()).toBe(false);
+		expect(harness.frames).toEqual([]);
 	});
 
 	it("propose throws a ToolError when plan-mode is no longer active", async () => {

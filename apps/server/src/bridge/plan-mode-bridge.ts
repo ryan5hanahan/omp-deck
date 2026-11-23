@@ -5,17 +5,19 @@
  * the deck's WebSocket protocol:
  *
  *   1. Client sends `set_plan_mode {enabled:true}` → `enter()`:
- *      - snapshot active tools, splice in `write` if missing (it is the
- *        `xd://propose` submission transport)
- *      - `setActiveToolsByName(planTools)`
- *      - `setPlanModeState({ enabled, planFilePath, workflow })`
+ *      - snapshot active tools, splice in `write` if missing (the agent
+ *        drafts the plan file with it)
+ *      - `setPlanModeState({ enabled, planFilePath, workflow })` first: the
+ *        SDK presents `propose` as a top-level tool (when `bash` does not
+ *        carry it as a command) only if plan mode is on when tools rebuild
+ *      - `setActiveToolsByName(planTools)`, rolling the state back on failure
  *      - `setPlanProposalHandler(#handlePlanProposal)`
  *      - broadcast `plan_mode_changed{enabled:true}`
  *
  *   2. Agent works under plan-mode restrictions (SDK's
  *      `#enforcePlanModeToolDecision` blocks writes via the system
  *      prompt + tool-decision intercept), writes `local://<slug>-plan.md`,
- *      then writes the plan title to `xd://propose`. The SDK invokes our
+ *      then submits the plan title with `propose`. The SDK invokes our
  *      proposal handler with that title.
  *
  *   3. `#handlePlanProposal`:
@@ -37,7 +39,7 @@
  *      message to the agent.
  *
  *   6. On cancel (user toggles plan mode off mid-approval) or session
- *      dispose: reject the pending promise so the `xd://propose` write
+ *      dispose: reject the pending promise so the `propose` call
  *      returns with an error the agent can recover from.
  *
  * SDK reference impls: `modes/acp/acp-agent.ts` (`#applyModeChange`,
@@ -72,9 +74,10 @@ const log = logger("bridge:plan-mode");
  *  finds whichever it wrote. */
 const PLAN_FILE_URL = "local://PLAN.md";
 
-/** Tool the SDK requires for plan-mode submission (`write` to `xd://propose`).
- *  Spliced into the active tool set on enter if it isn't already there. */
-const PROPOSE_TOOL = "write";
+/** Tool the agent drafts the plan file with. Spliced into the active tool
+ *  set on enter if it isn't already there. Submission goes through the
+ *  SDK's `propose`, which needs no tool selection. */
+const PLAN_DRAFT_TOOL = "write";
 
 /** Workflow flavor passed to `setPlanModeState`. MVP only supports
  *  `"parallel"`; `"iterative"` (TUI-only) is explicitly out of scope. */
@@ -92,7 +95,7 @@ const PLAN_WORKFLOW = "parallel" as const;
  * we want a stable contract that's visible alongside the lifecycle code
  * rather than a fragile runtime fetch. **Mirror SDK changes here on
  * upgrade.** Diff against the upstream file when bumping
- * `@oh-my-pi/pi-coding-agent`. (Last synced: 18.18.0.)
+ * `@oh-my-pi/pi-coding-agent`. (Last synced: 19.1.0.)
  */
 const PLAN_APPROVED_PROMPT_TEMPLATE = `Plan approved.
 - History usable; the plan below authoritative if it conflicts with earlier exploration.
@@ -251,20 +254,26 @@ export class PlanModeBridge {
 		if (this.disposed || this.enabled) return;
 
 		const previousTools = this.session.getActiveToolNames();
-		const planTools = previousTools.includes(PROPOSE_TOOL)
+		const planTools = previousTools.includes(PLAN_DRAFT_TOOL)
 			? previousTools
-			: [...previousTools, PROPOSE_TOOL];
-		await this.session.setActiveToolsByName(planTools);
+			: [...previousTools, PLAN_DRAFT_TOOL];
+		// State lands before the tool rebuild: the SDK presents `propose` as a
+		// top-level tool only while plan mode is on (when `bash` doesn't carry it).
+		this.session.setPlanModeState({
+			enabled: true,
+			planFilePath: PLAN_FILE_URL,
+			workflow: PLAN_WORKFLOW,
+		});
+		try {
+			await this.session.setActiveToolsByName(planTools);
+		} catch (err) {
+			this.session.setPlanModeState(undefined);
+			throw err;
+		}
 
 		this.previousTools = previousTools;
 		this.planFilePath = PLAN_FILE_URL;
 		this.enabled = true;
-
-		this.session.setPlanModeState({
-			enabled: true,
-			planFilePath: this.planFilePath,
-			workflow: PLAN_WORKFLOW,
-		});
 		this.session.setPlanProposalHandler((title) => this.#handlePlanProposal(title));
 
 		this.#broadcast({
@@ -279,7 +288,7 @@ export class PlanModeBridge {
 	/**
 	 * Exit plan mode. Idempotent. Rejects any pending approval first so the
 	 * proposal handler unblocks with a clear error the agent sees as the
-	 * `xd://propose` write's failure result.
+	 * `propose` call's failure result.
 	 *
 	 * `reason` differentiates user-cancel (Shift+Tab off, Reject click) from
 	 * server-side cleanup (session disposed, approve path that already did
@@ -310,6 +319,9 @@ export class PlanModeBridge {
 		}
 
 		if (this.enabled) {
+			// Clear plan state before restoring tools so the rebuild drops `propose`.
+			this.session.setPlanProposalHandler(null);
+			this.session.setPlanModeState(undefined);
 			if (this.previousTools.length > 0) {
 				try {
 					await this.session.setActiveToolsByName(this.previousTools);
@@ -317,8 +329,6 @@ export class PlanModeBridge {
 					log.warn(`tool restore failed during exit for ${this.sessionId}`, err);
 				}
 			}
-			this.session.setPlanProposalHandler(null);
-			this.session.setPlanModeState(undefined);
 			this.enabled = false;
 			this.previousTools = [];
 
@@ -371,10 +381,10 @@ export class PlanModeBridge {
 	}
 
 	/**
-	 * Plan-proposal handler. The SDK calls this when the agent writes the
-	 * plan title to `xd://propose` while plan-mode is active. Blocks on the
+	 * Plan-proposal handler. The SDK calls this when the agent submits the
+	 * plan title with `propose` while plan-mode is active. Blocks on the
 	 * user's `plan_response` reply; the returned result is what the agent
-	 * sees as the write's outcome. On approve, the deferred
+	 * sees as the `propose` outcome. On approve, the deferred
 	 * `session.prompt(..., followUp)` starts a fresh turn that executes the
 	 * approved plan.
 	 */
@@ -468,7 +478,7 @@ export class PlanModeBridge {
 			planFilePath: finalPlanFilePath,
 		});
 
-		// Fire-and-forget: the `xd://propose` write is still in flight at
+		// Fire-and-forget: the `propose` call is still in flight at
 		// this point (we haven't returned yet), so the SDK queues the prompt
 		// as followUp and fires it once the current turn ends. The
 		// `synthetic` flag is intentionally absent — the SDK's queue path

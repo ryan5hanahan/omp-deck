@@ -26,7 +26,7 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
-        bun: ["1.3.14"]
+        bun: ["1.4.4"]
     steps:
       - uses: actions/checkout@v4
 
@@ -44,7 +44,8 @@ jobs:
         run: bun test
 
       - name: web build
-        run: bun --cwd apps/web run build
+        # Bun 1.4 treats `bun --cwd <dir> run …` as a bare `bun run` (prints usage, exits 0).
+        run: bun run --cwd apps/web build
 
   # ─── Linux container build + smoke test ───────────────────────────────────
   #
