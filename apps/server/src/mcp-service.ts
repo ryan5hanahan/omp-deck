@@ -120,6 +120,12 @@ export class McpService {
 		return sdkCallTool(await this.#connection(server), tool, args, { signal });
 	}
 
+	/** The discovered manager, for SDK calls this service doesn't wrap (reconnect, reauth, session injection). */
+	async getManager(): Promise<MCPManager> {
+		await this.#ensureConnected();
+		return this.#manager;
+	}
+
 	/** Drop every connection and rediscover, picking up config changes. */
 	async reload(): Promise<void> {
 		await this.#manager.disconnectAll();
