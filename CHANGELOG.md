@@ -5,6 +5,13 @@ All notable changes to omp-deck. The format is loosely based on
 
 ## [Unreleased]
 
+### Added
+
+- **Routine `mcp` step works.** It calls one tool on an MCP server the deck can see (the same configs omp discovers), checks the rendered `args` against the tool's input schema, and exposes the result as `steps.<id>.json` (`structuredContent`, else JSON text, else the content blocks). It was a stub that always failed.
+- **Drag-and-drop step reordering** in the routine builder (drag handle or keyboard), with a warning and Revert when a move puts a step before one it reads from. Steps can be duplicated.
+- **`max_parallel`** caps `concurrency: parallel`; runs over the cap queue (up to 10, then skip).
+- **`!` / `!!` bash and `$` / `$$` Python from the composer**, with the TUI's rules: the doubled sigil keeps the output out of the model's context. Output streams into a card in the chat.
+
 ### Changed
 
 - **omp SDK 19.1.0, Bun ≥ 1.4.4.** `@oh-my-pi/pi-ai`, `pi-coding-agent` and `pi-tui` move from 18.18.0 to 19.1.0. Engines, the CI matrix and the Docker base image move to Bun 1.4.4, which 19.1.0 requires.
@@ -16,6 +23,7 @@ All notable changes to omp-deck. The format is loosely based on
 - **`concurrency: queue` did not queue.** A queued run started at once instead of waiting for the active run, so `queue` behaved like `parallel`. It now waits for the active run to finish.
 - **CI web build ran nothing on Bun 1.4.** `bun --cwd apps/web run build` prints `bun run` usage and exits 0; the step now runs `bun run --cwd apps/web build`.
 - **SDK 19.1.0 package root failed to import** (upstream #20058). `patches/@oh-my-pi%2Fpi-coding-agent@19.1.0.patch` backports upstream `295ea02a1`; remove it with the next SDK bump.
+- **Webhook secrets stopped working after a save**, and path collisions were only logged. Saving keeps the secret, removing a webhook trigger retires its path, and a path another routine owns returns 409 on create, save and rotate. Installing a template twice suffixes the path. A routine may have at most one webhook trigger.
 
 ## [0.5.0] — 2026-05-28 — Cross-platform CI, Linux container, Mac/Linux launcher
 
