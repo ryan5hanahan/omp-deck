@@ -11,11 +11,14 @@ All notable changes to omp-deck. The format is loosely based on
 - **Drag-and-drop step reordering** in the routine builder (drag handle or keyboard), with a warning and Revert when a move puts a step before one it reads from. Steps can be duplicated.
 - **`max_parallel`** caps `concurrency: parallel`; runs over the cap queue (up to 10, then skip).
 - **`!` / `!!` bash and `$` / `$$` Python from the composer**, with the TUI's rules: the doubled sigil keeps the output out of the model's context. Output streams into a card in the chat.
+- **Integrations page.** Lists every MCP server the deck sees (user, project, or discovered elsewhere) with status and tools; add stdio or http/sse servers, enable/disable, test, reauthorize and remove. A Google Workspace tile pre-fills `uvx workspace-mcp`. Backed by a new `/api/mcp`.
+- **Event triggers fire.** Routines can trigger on a new inbox item, a card moving to another column, another routine finishing, or a Telegram message, with an optional JS `filter`. A routine never fires on its own events, and chains stop at depth 3.
 
 ### Changed
 
 - **omp SDK 19.1.0, Bun ≥ 1.4.4.** `@oh-my-pi/pi-ai`, `pi-coding-agent` and `pi-tui` move from 18.18.0 to 19.1.0. Engines, the CI matrix and the Docker base image move to Bun 1.4.4, which 19.1.0 requires.
 - **Plan mode sets SDK plan state before rebuilding tools.** 19.1.0 submits plans with `propose`, which it presents only while plan mode is on, so a session without `bash` could not submit a plan under the old order.
+- **Routine `agent` steps run in-process** instead of shelling out to `omp -p`. `skills_allowed` and `mcp_servers_allowed` are now enforced, `structured_output` uses the SDK's `yield` tool, and budgets use the session's real token counts and cost instead of a length/4 estimate.
 
 ### Fixed
 
