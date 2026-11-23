@@ -269,7 +269,8 @@ export interface McpServerSummary {
 	name: string;
 	scope: McpServerScope;
 	sourcePath?: string;
-	transport: McpTransport;
+	/** Absent for an `external` server disabled via the user denylist: the SDK no longer loads its config. */
+	transport?: McpTransport;
 	enabled: boolean;
 	status: McpServerStatus;
 	toolCount: number;

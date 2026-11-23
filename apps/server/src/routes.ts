@@ -21,6 +21,8 @@ import { buildSettingsRouter } from "./routes-settings.ts";
 import { buildRoutinesRouter } from "./routes-routines.ts";
 import { buildHooksRouter } from "./routes-hooks.ts";
 import { buildInboxRouter } from "./routes-inbox.ts";
+import { buildEventsRouter } from "./routes-events.ts";
+import { buildMcpRouter } from "./routes-mcp.ts";
 import { buildUtilityRouter } from "./routes-cron.ts";
 import { buildSlashCommandsRouter } from "./routes-slash-commands.ts";
 import { buildFsRouter, isCwdAllowed } from "./routes-fs.ts";
@@ -251,6 +253,8 @@ export function buildRouter(
 	app.route("/", buildRoutinesRouter(runner));
 	app.route("/", buildHooksRouter(runner));
 	app.route("/", buildInboxRouter());
+	app.route("/", buildEventsRouter());
+	app.route("/", buildMcpRouter());
 	app.route("/", buildUtilityRouter());
 	app.route("/", buildSlashCommandsRouter());
 	app.route("/", buildFsRouter());
