@@ -1,10 +1,14 @@
 import {
 	createAgentSession,
+	discoverSkills,
 	ModelRegistry,
 	SessionManager,
+	Settings,
 	settings as ompSettings,
 	type AgentSession,
 } from "@oh-my-pi/pi-coding-agent";
+import { getModelMatchPreferences, resolveCliModel } from "@oh-my-pi/pi-coding-agent/config/model-resolver";
+import { cfgDisabledExtensions, cfgSkills } from "@oh-my-pi/pi-coding-agent/extensibility/settings";
 import { runExtensionCompact, runExtensionSetModel } from "@oh-my-pi/pi-coding-agent/extensibility/extensions/compact-handler";
 import { getSessionSlashCommands } from "@oh-my-pi/pi-coding-agent/extensibility/extensions/get-commands-handler";
 // `Model` is owned by `@oh-my-pi/pi-ai`, a transitive dep we don't bring in
@@ -38,12 +42,16 @@ import type {
 import { logger } from "../log.ts";
 import { getDeckModelRegistry } from "../auth-singleton.ts";
 import { getEffectivePrelude } from "../orientation-store.ts";
+import { getMcpService } from "../mcp-service.ts";
+import { buildHeadlessOptions } from "../routines/headless-options.ts";
 import { ExtensionUIBridge } from "./ext-ui-bridge.ts";
 import { PlanModeBridge } from "./plan-mode-bridge.ts";
 import type {
 	AgentBridge,
 	CreateSessionOpts,
 	EventListener,
+	HeadlessRunOptions,
+	HeadlessRunResult,
 	PlanApprovalResponse,
 	ResumeSessionOpts,
 	RuntimeEnvUpdate,
@@ -193,6 +201,88 @@ export class InProcessAgentBridge implements AgentBridge {
 		const registry = await this.ensureModelRegistry();
 		const current = opts.sessionId ? this.active.get(opts.sessionId)?.handle.snapshot().model : undefined;
 		return registry.getAll().map((model) => modelInfoFromSdk(model as unknown as SdkModel, registry, current));
+	}
+
+	async runHeadless(opts: HeadlessRunOptions): Promise<HeadlessRunResult> {
+		const modelRegistry = await this.ensureModelRegistry();
+		// The instance `createAgentSession` loads for itself, so filtered skills match what it would discover.
+		const settings = await Settings.init({ cwd: opts.cwd });
+		// Same resolver as `omp --model`, so bare ids like `claude-sonnet-4-6` keep working.
+		const resolved = opts.model
+			? resolveCliModel({
+					cliModel: opts.model,
+					modelRegistry,
+					settings,
+					preferences: getModelMatchPreferences(settings),
+				})
+			: undefined;
+		if (resolved && !resolved.model) throw new Error(resolved.error ?? `Model "${opts.model}" not found`);
+		if (resolved?.warning) log.warn(`${opts.label}: ${resolved.warning}`);
+
+		const scoped = await buildHeadlessOptions(opts, {
+			discoverSkills: async () => {
+				const skillSettings = { ...cfgSkills.get(settings), disabledExtensions: cfgDisabledExtensions.get(settings) };
+				return (await discoverSkills(opts.cwd, undefined, skillSettings)).skills;
+			},
+			getMcpManager: () => getMcpService().getManager(),
+		});
+		if (opts.mcpServers) {
+			const names = scoped.mcpTools?.map((tool) => tool.name).join(", ");
+			log.info(`${opts.label}: MCP tools handed to session: ${names || "none"}`);
+		}
+
+		opts.signal.throwIfAborted();
+		const { session } = await createAgentSession({
+			cwd: opts.cwd,
+			sessionManager: SessionManager.inMemory(opts.cwd),
+			modelRegistry,
+			authStorage: modelRegistry.authStorage,
+			hasUI: false,
+			skipPythonPreflight: true,
+			cacheWarming: "off",
+			...(resolved?.model ? { model: resolved.model, thinkingLevel: resolved.thinkingLevel } : {}),
+			...scoped,
+			// A top-level session ignores `outputSchema` unless the yield tool is required.
+			...(opts.outputSchema !== undefined ? { outputSchema: opts.outputSchema, requireYieldTool: true } : {}),
+		});
+		let yielded: unknown;
+		const unsubscribe = session.subscribe((event) => {
+			if (event.type !== "tool_execution_end" || event.toolName !== "yield" || event.isError) return;
+			const details = (event.result as { details?: { status?: string; data?: unknown } } | undefined)?.details;
+			if (details?.status === "success") yielded = details.data;
+		});
+		const onAbort = () => {
+			session.abort().catch((err) => log.warn(`${opts.label}: abort failed`, err));
+		};
+		opts.signal.addEventListener("abort", onAbort, { once: true });
+		try {
+			// Default extension discovery, as `omp -p` had; wiring makes the loaded extensions live.
+			await this.wireExtensionRunner(session);
+			opts.signal.throwIfAborted();
+			// Top-level sessions get no built-in instruction to call `yield`.
+			const prompt =
+				opts.outputSchema === undefined
+					? opts.prompt
+					: `${opts.prompt}\n\nWhen you are done, call the \`yield\` tool with your result as \`data\`.`;
+			await session.prompt(prompt);
+			await session.waitForRunEnd();
+			const last = session.getLastAssistantMessage();
+			const failed = last?.stopReason === "error" || last?.stopReason === "aborted";
+			const stats = session.getSessionStats();
+			const model = session.model;
+			return {
+				text: session.getLastAssistantText() ?? "",
+				json: yielded,
+				error: failed ? last?.errorMessage || `request ${last?.stopReason}` : undefined,
+				usage: { ...stats.tokens, cost: stats.cost },
+				model: model ? `${model.provider}/${model.id}` : "",
+			};
+		} finally {
+			opts.signal.removeEventListener("abort", onAbort);
+			unsubscribe();
+			// Disposing cancels anything the run left running; `waitForRunEnd` already waited for its jobs.
+			await session.dispose().catch((err) => log.warn(`${opts.label}: session dispose failed`, err));
+		}
 	}
 
 	async dispose(): Promise<void> {

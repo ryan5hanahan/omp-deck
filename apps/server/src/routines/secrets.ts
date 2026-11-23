@@ -10,8 +10,8 @@
  *   output by any path (template, `echo $KEY` in a run step, an echoing HTTP
  *   API) is recorded as `[REDACTED]`.
  *
- * `run` / `agent` subprocesses still inherit the real environment: shell
- * commands run as the user, and `omp -p` needs its provider keys.
+ * `run` subprocesses and in-process `agent` steps still see the real
+ * environment: shell commands run as the user, and providers need their keys.
  */
 import { ENV_SCHEMA_BY_KEY } from "../env-schema.ts";
 

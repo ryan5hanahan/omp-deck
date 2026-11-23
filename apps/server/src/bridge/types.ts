@@ -74,11 +74,54 @@ export interface AgentBridge {
 		response: PlanApprovalResponse,
 	): Promise<"settled" | "unknown">;
 	dispose(): Promise<void>;
+	/**
+	 * One-shot agent run for routine `agent` steps: an in-memory session with no
+	 * UI and no deck prelude, disposed when the run ends. Throws before any LLM
+	 * call on an unknown model or an allowlisted MCP server that isn't installed.
+	 */
+	runHeadless(opts: HeadlessRunOptions): Promise<HeadlessRunResult>;
 }
 
 export interface RuntimeEnvUpdate {
 	idleTimeoutMs?: number;
 	autoStartCommand?: string | null;
+}
+
+export interface HeadlessRunOptions {
+	cwd: string;
+	prompt: string;
+	/** Log prefix, e.g. `agent step write_briefing`. */
+	label: string;
+	/** Model selector as `omp --model` takes it (bare id, `provider/id`, role); omitted = the SDK default. */
+	model?: string;
+	/** Skill names. Omitted = all discovered, `[]` = none. */
+	skills?: string[];
+	/** MCP server names. Omitted = the SDK's own discovery, `[]` = MCP off. */
+	mcpServers?: string[];
+	/** JSON Schema the model's `yield` result is checked against by the SDK. */
+	outputSchema?: unknown;
+	signal: AbortSignal;
+}
+
+export interface HeadlessRunResult {
+	/** Final assistant text. */
+	text: string;
+	/** `data` of the last successful `yield` call; undefined when the model never yielded. */
+	json?: unknown;
+	/** Set when the run ended on a model error or abort; usage still counts what was spent. */
+	error?: string;
+	usage: {
+		input: number;
+		output: number;
+		reasoning: number;
+		cacheRead: number;
+		cacheWrite: number;
+		total: number;
+		/** USD. */
+		cost: number;
+	};
+	/** `provider/id` the session ran on. */
+	model: string;
 }
 
 export interface CreateSessionOpts {

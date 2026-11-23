@@ -11,6 +11,7 @@ import * as path from "node:path";
 
 import { InProcessAgentBridge } from "./bridge/in-process.ts";
 import { RoutinesRunner } from "./routines-runner.ts";
+import { setHeadlessRunner } from "./routines/v1-runner.ts";
 import { closeDb, openDb } from "./db/index.ts";
 import { loadConfig } from "./config.ts";
 import { buildAllowedHosts, rejectReason } from "./request-guard.ts";
@@ -100,6 +101,7 @@ async function main(): Promise<void> {
 		idleTimeoutMs: config.idleTimeoutMs,
 		autoStartCommand: config.autoStartCommand,
 	});
+	setHeadlessRunner((opts) => bridge.runHeadless(opts));
 	const routinesRunner = new RoutinesRunner();
 	routinesRunner.start();
 	let server: Server<ConnectionData>;

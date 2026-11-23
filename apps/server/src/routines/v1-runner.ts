@@ -38,7 +38,7 @@ import { finalizeRun, finishStepRun, insertSkippedStepRun, startStepRun } from "
 import { logger } from "../log.ts";
 import { accumulate, checkBudget, newBudgetState } from "./budget.ts";
 import { evaluate } from "./sandbox.ts";
-import { executeAgentStep } from "./steps/agent.ts";
+import { executeAgentStep, type HeadlessRunner } from "./steps/agent.ts";
 import { executeDeckStep } from "./steps/deck.ts";
 import { executeHttpStep } from "./steps/http.ts";
 import { executeMcpStep, type McpStepClient } from "./steps/mcp.ts";
@@ -52,6 +52,13 @@ import { scrubbableValues, scrubSecrets, splitEnv } from "./secrets.ts";
 import type { AbortReason, RunContext, StepContextEntry, StepResult } from "./types.ts";
 
 const log = logger("routines-v1");
+
+let registeredHeadlessRunner: HeadlessRunner | undefined;
+
+/** Default `runHeadless` for agent steps; index.ts registers the bridge's at boot. */
+export function setHeadlessRunner(runner: HeadlessRunner | undefined): void {
+	registeredHeadlessRunner = runner;
+}
 
 export interface V1RunHandle {
 	runId: string;
@@ -84,13 +91,15 @@ export async function runV1Pipeline(input: {
 	/**
 	 * Per-run sandbox root for `agent` steps. The runner creates
 	 * `<agentSandboxRoot>/<runId>/` lazily on the first `agent` step and uses
-	 * it as the cwd for that step's `omp -p` child process. Keeps agent steps
+	 * it as the cwd for that step's headless agent session. Keeps agent steps
 	 * away from the user's home (where unrelated files may be inferred by
 	 * the coding agent as 'briefing material').
 	 */
 	agentSandboxRoot: string;
 	/** MCP client for `mcp` steps; defaults to the deck MCP service. Tests inject a fake. */
 	mcp?: McpStepClient;
+	/** Runs `agent` steps; defaults to the one registered with `setHeadlessRunner`. Tests inject a fake. */
+	runHeadless?: HeadlessRunner;
 }): Promise<{ status: "success" | "failed" | "aborted"; abortReason?: AbortReason }> {
 	const { routine, spec, runId, triggerKind, triggerPayload, abortSignal, defaultCwd, agentSandboxRoot } = input;
 	const startedAt = new Date();
@@ -224,6 +233,7 @@ export async function runV1Pipeline(input: {
 					routine.id,
 					ensureAgentSandbox,
 					input.mcp,
+					input.runHeadless ?? registeredHeadlessRunner,
 				),
 				secretValues,
 			);
@@ -389,17 +399,18 @@ async function dispatchStep(
 	routineId: string,
 	ensureAgentSandbox: () => Promise<string>,
 	mcp: McpStepClient | undefined,
+	runHeadless: HeadlessRunner | undefined,
 ): Promise<StepResult> {
 	switch (step.type) {
 		case "run":
 			return executeRunStep(step, context, signal, routineCwd);
 		case "agent": {
-			// Agent steps shell out to `omp -p`, which is a full coding agent
-			// with read / bash / search / etc. Run it in a deck-owned per-run
-			// scratch dir so it can't latch onto unrelated files in the user's
-			// home and use them as 'input data' (daily-briefing drift case).
+			// An agent step is a full coding agent with read / bash / search /
+			// etc. Run it in a deck-owned per-run scratch dir so it can't latch
+			// onto unrelated files in the user's home and use them as 'input
+			// data' (daily-briefing drift case).
 			const sandbox = await ensureAgentSandbox();
-			return executeAgentStep(step, context, signal, sandbox);
+			return executeAgentStep(step, context, signal, sandbox, runHeadless);
 		}
 		case "write":
 			return executeWriteStep(step, context, signal, routineCwd);
