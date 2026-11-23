@@ -8,7 +8,7 @@
  * `$ref`-resolves against that namespace.
  */
 
-import Ajv2020, { type ErrorObject } from "ajv/dist/2020";
+import Ajv2020, { type ErrorObject, type ValidateFunction } from "ajv/dist/2020";
 import addFormats from "ajv-formats";
 
 import routineSpecSchema from "./schemas/routine-spec.json";
@@ -123,6 +123,31 @@ export function validateRoutineSpec(spec: unknown): ValidationResult {
 		return { valid: false, errors: crossRef };
 	}
 	return { valid: true };
+}
+
+let cachedLooseAjv: Ajv2020 | null = null;
+const compiledSchemas = new WeakMap<object, ValidateFunction>();
+
+/**
+ * Validate `value` against an arbitrary JSON Schema: an MCP tool's
+ * `inputSchema` or an agent step's `structured_output.schema`. Top-level
+ * `$schema` and `$id` are dropped so draft-07 schemas compile under the
+ * 2020-12 validator and repeated ids don't collide. Throws when the schema
+ * itself cannot be compiled; callers decide whether that blocks.
+ */
+export function validateAgainstSchema(schema: unknown, value: unknown): ValidationResult {
+	if (!schema || typeof schema !== "object") throw new Error("schema must be a JSON Schema object");
+	let validate = compiledSchemas.get(schema);
+	if (!validate) {
+		if (!cachedLooseAjv) {
+			cachedLooseAjv = new Ajv2020({ allErrors: true, strict: false, validateSchema: false });
+			addFormats(cachedLooseAjv);
+		}
+		const { $schema: _draft, $id: _id, ...body } = schema as Record<string, unknown>;
+		validate = cachedLooseAjv.compile(body);
+		compiledSchemas.set(schema, validate);
+	}
+	return validate(value) ? { valid: true } : { valid: false, errors: normalizeErrors(validate.errors) };
 }
 
 /**

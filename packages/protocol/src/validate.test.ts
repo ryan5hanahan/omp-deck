@@ -16,7 +16,7 @@
 import { describe, expect, test } from "bun:test";
 
 import type { RoutineSpec } from "./index.ts";
-import { validateRoutineSpec } from "./validate.ts";
+import { validateAgainstSchema, validateRoutineSpec } from "./validate.ts";
 
 // ─── reference: daily-briefing (V1 plan §4.2) ──────────────────────────────
 
@@ -474,5 +474,27 @@ describe("validateRoutineSpec — layout (V2 canvas)", () => {
 			(e) => e.keyword === "const" && e.path.startsWith("/layout/version"),
 		);
 		expect(hasVersionError).toBe(true);
+	});
+});
+
+describe("validateAgainstSchema", () => {
+	test("accepts a draft-07 tool schema and reports the offending field", () => {
+		const schema = {
+			$schema: "http://json-schema.org/draft-07/schema#",
+			$id: "urn:tool:search",
+			type: "object",
+			required: ["query"],
+			properties: { query: { type: "string" }, limit: { type: "integer", minimum: 1 } },
+		};
+		expect(validateAgainstSchema(schema, { query: "from:me", limit: 5 })).toEqual({ valid: true });
+		const bad = validateAgainstSchema(schema, { limit: 0 });
+		expect(bad.valid).toBe(false);
+		expect(bad.errors?.map((e) => e.keyword).sort()).toEqual(["minimum", "required"]);
+		// Same $id again must not collide with the cached compile.
+		expect(validateAgainstSchema({ ...schema }, { query: "x" })).toEqual({ valid: true });
+	});
+
+	test("throws on a schema that cannot compile", () => {
+		expect(() => validateAgainstSchema({ type: "object", properties: { a: { $ref: "#/nope" } } }, {})).toThrow();
 	});
 });

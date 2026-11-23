@@ -13,7 +13,7 @@
  */
 
 // Re-export the V1 routine spec validator. JSON Schemas live in src/schemas/.
-export { validateRoutineSpec } from "./validate";
+export { validateAgainstSchema, validateRoutineSpec } from "./validate";
 export type { ValidationError, ValidationResult } from "./validate";
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -606,6 +606,35 @@ export type AgentSessionEventJson = Record<string, unknown> & {
 	type: string;
 };
 
+/** Language of a composer `!` (bash) / `$` (python) execution. */
+export type ExecLang = "bash" | "python";
+
+/**
+ * Synthetic session events for composer executions (`exec` client frame).
+ * Sequence per execution: `exec_start`, zero or more `exec_chunk`, then
+ * either synthetic `message_start` + `message_end` whose `message` is the
+ * SDK-recorded `bashExecution` / `pythonExecution` message (both events also
+ * carry `execId`), or `exec_error` when nothing was recorded (refused while
+ * another execution runs, kernel unavailable, …).
+ */
+export interface ExecStartEvent {
+	type: "exec_start";
+	execId: string;
+	lang: ExecLang;
+	code: string;
+	excludeFromContext: boolean;
+}
+export interface ExecChunkEvent {
+	type: "exec_chunk";
+	execId: string;
+	chunk: string;
+}
+export interface ExecErrorEvent {
+	type: "exec_error";
+	execId: string;
+	error: string;
+}
+
 /**
  * Context-window utilization for an in-process agent session. Mirrors the
  * SDK's `ContextUsage` shape but is defined here so the protocol package owns
@@ -801,7 +830,15 @@ export type ClientFrame =
 			approved: boolean;
 			finalPath?: string;
 			editedContent?: string;
-	  };
+	  }
+	/**
+	 * Composer `!` / `$` execution (TUI parity): runs `code` with the SDK's
+	 * `executeBash` / `executePython`, outside any model turn. Replies with
+	 * the `exec_*` session events (see `ExecStartEvent`).
+	 */
+	| { type: "exec"; sessionId: string; lang: ExecLang; code: string; excludeFromContext: boolean }
+	/** Abort the session's running execution; no-op when none is running. */
+	| { type: "abort_exec"; sessionId: string };
 
 /** Server → Client. */
 export type ServerFrame =
@@ -1464,6 +1501,8 @@ export interface RoutineSpec {
 	description?: string;
 	trigger: RoutineTrigger[];
 	concurrency?: RoutineConcurrency;
+	/** Cap on concurrent runs when `concurrency` is `parallel` (integer ≥ 1); runs above it queue (depth 10). */
+	max_parallel?: number;
 	timezone?: string;
 	budget?: RoutineBudget;
 	/** Declared cross-run state keys (informational; runtime can write any key via set_state). */
